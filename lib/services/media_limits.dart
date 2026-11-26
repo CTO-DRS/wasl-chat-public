@@ -15,7 +15,7 @@ class MediaLimits {
   MediaLimits._();
 
   /// الحد الأقصى لأي وسيط يُرسل في المحادثات (فيديو أو ملف) بالبايتات.
-  static const int maxMediaBytes = 24 * 1024 * 1024;
+  static const int maxMediaBytes = 48 * 1024 * 1024;
 
   /// الحد الأقصى لحالة فيديو/صورة (المرحلة 11 ب — نفس الحد وقتها).
   static const int maxStatusBytes = 24 * 1024 * 1024;
@@ -24,7 +24,7 @@ class MediaLimits {
   static const int maxStatusVideoBytes = 12 * 1024 * 1024;
 
   /// النص العربي الموحّد للحد — مكان واحد يتغير مع الحد نفسه.
-  static const String maxMediaText = '24 ميغابايت';
+  static const String maxMediaText = '48 ميغابايت';
 
   /// التسمية العربية للحد بحجمه المحسوب (للأدوات والتقارير).
   static String get maxMediaLabel =>

@@ -22,6 +22,13 @@ class PrivacyService {
   /// المؤشرات الحيوية (الهالة، شارة العودة، نبض الكتابة) — محلية فقط
   static final liveFx = ValueNotifier<bool>(true);
 
+  /// توفير البيانات: لا تنزيل تلقائي للصور — تظهر بطاقة «اضغط للتحميل» وتُحمَّل
+  /// بنقرة. الافتراضي مطفأ؛ محلي على جهازك فقط.
+  static final dataSaver = ValueNotifier<bool>(false);
+
+  /// صور حُمّلت يدوياً في هذه الجلسة (لا تُسأل مرتين)
+  static final Set<String> manuallyLoaded = <String>{};
+
   static Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
@@ -36,6 +43,9 @@ class PrivacyService {
     await one('wasl_priv_presence', sharePresence);
     await one('wasl_priv_typing', shareTyping);
     await one('wasl_priv_fx', liveFx);
+    try {
+      dataSaver.value = (await _store.read(key: 'wasl_data_saver')) == '1';
+    } catch (_) {}
   }
 
   static Future<void> set(String key, bool v) async {

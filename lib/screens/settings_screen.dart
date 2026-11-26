@@ -30,6 +30,7 @@ import 'admin_screen.dart';
 import 'shield_screen.dart';
 import 'about_developer_screen.dart';
 import 'beta_screen.dart';
+import 'business_replies_screen.dart';
 import 'backup_export_screen.dart';
 import 'e2e_key_screen.dart';
 import 'hijri_occasions_screen.dart';
@@ -279,6 +280,8 @@ class SettingsScreen extends StatelessWidget {
               subtitle: 'الملخّص والترجمة والصياغة والردود الذكية — من «المزيد» داخل أي محادثة',
               trailing: const DevBadge(short: true),
             ),
+            _nav(context, Icons.storefront_rounded, WaslColors.teal, 'ردود الأعمال',
+                'قوالب سريعة ورد تلقائي', () => const BusinessRepliesScreen()),
             _nav(context, Icons.smart_toy_rounded, WaslColors.violet, 'البوتات والمطوّرون',
                 null, () => const BotsScreen()),
             const _OnDeviceModelTile(),
@@ -465,6 +468,9 @@ class _LivePrivacyCardState extends State<_LivePrivacyCard> {
       _row('wasl_priv_typing', PrivacyService.shareTyping, 'حالة الكتابة',
           'إيقافها يمنع بث «يكتب الآن…»',
           Icons.keyboard_rounded, WaslColors.info),
+      _row('wasl_data_saver', PrivacyService.dataSaver, 'توفير البيانات',
+          'لا تنزيل تلقائي للصور — اضغط الصورة لتحميلها عند الحاجة',
+          Icons.data_saver_on_rounded, WaslColors.teal),
       _row('wasl_priv_fx', PrivacyService.liveFx, 'المؤشرات الحيوية',
           'الهالة وشارة العودة — محلية على جهازك فقط',
           Icons.bolt_rounded, WaslColors.warning),

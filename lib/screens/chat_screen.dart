@@ -89,6 +89,7 @@ import 'voice_room_screen.dart';
 import '../widgets/wasl_sheet.dart';
 import '../services/post_build_coalescer.dart';
 import '../widgets/quick_reply_row.dart';
+import '../services/business_reply_service.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -4038,6 +4039,24 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     _repliesFor = id;
     final replies = LocalAiService.smartReplies(text);
     if (mounted) setState(() => _smartReplies = replies);
+    _maybeAutoReply(last, text);
+  }
+
+  /// الرد التلقائي للأعمال: خاص فقط، رسالة حديثة من الطرف الآخر، مرة لكل فترة تهدئة
+  void _maybeAutoReply(Map<String, dynamic> last, String text) {
+    if (widget.isGroup || widget.isChannel || widget.isSaved) return;
+    if (!BusinessReplyService.autoReplyEnabled.value) return;
+    final at = DateTime.tryParse('${last['created_at'] ?? ''}');
+    if (at == null || DateTime.now().difference(at).inMinutes > 3) return;
+    final reply =
+        BusinessReplyService.autoReplyFor(widget.conversationId, text);
+    if (reply == null) return;
+    BusinessReplyService.markAutoReplied(widget.conversationId);
+    final keep = _text.text;
+    _text.text = reply;
+    _sendText().then((_) {
+      if (mounted && _text.text.isEmpty) _text.text = keep;
+    });
   }
 
   // ---------- وصل AI ----------
@@ -5609,6 +5628,31 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                       ]),
                     ),
                   ),
+                ),
+              // قوالب الأعمال: اكتب «/» لاستدعائها (تُملأ المتغيرات عند الاختيار)
+              if (!_recording)
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _text,
+                  builder: (context, v, _) {
+                    final hits = BusinessReplyEngine.suggest(
+                        BusinessReplyService.templates.value, v.text);
+                    if (hits.isEmpty) return const SizedBox.shrink();
+                    return QuickReplyRow(
+                      key: const ValueKey('business-templates'),
+                      replies: [for (final t in hits) t.title],
+                      onReply: (title) {
+                        final t = hits.firstWhere((e) => e.title == title);
+                        final r = BusinessReplyEngine.render(t.text,
+                            vars: BusinessReplyService.vars,
+                            providers: BusinessReplyService.providers);
+                        setState(() {
+                          _text.text = r;
+                          _text.selection =
+                              TextSelection.fromPosition(TextPosition(offset: r.length));
+                        });
+                      },
+                    );
+                  },
                 ),
               // الردود الذكية المحلية (المرحلة 5) + شريحة الصياغة بأسلوبك (9 ب)
               if (!_recording)

@@ -1,3 +1,4 @@
+import '../services/privacy_service.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -171,7 +172,11 @@ class ImageBubble extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(WaslRadius.md),
       child: Stack(children: [
-        ProgressiveImage(
+        DataSaverGate(
+          id: messageId,
+          width: width,
+          height: height,
+          child: ProgressiveImage(
           loader: loader,
           preview: preview,
           width: width,
@@ -194,7 +199,7 @@ class ImageBubble extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: context.textSecondary, fontSize: WaslFont.meta)),
           ),
-        ),
+        )),
         if (protected)
           const PositionedDirectional(
             top: 6,
@@ -528,6 +533,77 @@ class _VoiceBubbleState extends State<VoiceBubble> {
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+}
+
+
+/// توفير البيانات: حين يكون الوضع مفعّلاً لا تُنزَّل الصورة ولا تُفكّ تلقائياً؛
+/// تظهر بطاقة بنقرة تحميل، وتبقى محمّلة بقية الجلسة. المطفأ = سلوك عادي بلا أثر.
+class DataSaverGate extends StatefulWidget {
+  const DataSaverGate({
+    super.key,
+    required this.id,
+    required this.width,
+    required this.height,
+    required this.child,
+  });
+  final String? id;
+  final double width;
+  final double? height;
+  final Widget child;
+
+  @override
+  State<DataSaverGate> createState() => _DataSaverGateState();
+}
+
+class _DataSaverGateState extends State<DataSaverGate> {
+  bool _local = false;
+  bool get _loaded =>
+      _local || (widget.id != null && PrivacyService.manuallyLoaded.contains(widget.id));
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: PrivacyService.dataSaver,
+      builder: (context, saver, _) {
+        if (!saver || _loaded) return widget.child;
+        return InkWell(
+          key: const ValueKey('data-saver-load'),
+          borderRadius: BorderRadius.circular(WaslRadius.md),
+          onTap: () => setState(() {
+            _local = true;
+            if (widget.id != null) PrivacyService.manuallyLoaded.add(widget.id!);
+          }),
+          child: Container(
+            width: widget.width,
+            height: widget.height ?? 140,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: context.glass,
+              borderRadius: BorderRadius.circular(WaslRadius.md),
+              border: Border.all(color: context.hairline),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: const BoxDecoration(
+                    shape: BoxShape.circle, color: Color(0x336366F1)),
+                child: const Icon(Icons.download_rounded, color: WaslColors.indigo),
+              ),
+              const SizedBox(height: WaslSpace.sm),
+              Text('اضغط لتحميل الصورة',
+                  style: TextStyle(
+                      color: context.textSecondary,
+                      fontSize: WaslFont.meta,
+                      fontWeight: FontWeight.w700)),
+              Text('وضع توفير البيانات',
+                  style: TextStyle(color: context.textFaint, fontSize: WaslFont.caption)),
+            ]),
+          ),
         );
       },
     );

@@ -33,8 +33,8 @@ void main() {
   });
 
   group('MediaLimits — مصدر واحد للحقيقة بدل التناثر اليدوي', () {
-    test('حد الوسائط 24 م.ب بالبايتات الدقيقة', () {
-      expect(MediaLimits.maxMediaBytes, 24 * 1024 * 1024);
+    test('حد الوسائط 48 م.ب بالبايتات الدقيقة (سقف التخزين 50 م.ب)', () {
+      expect(MediaLimits.maxMediaBytes, 48 * 1024 * 1024);
       expect(MediaLimits.maxStatusBytes, 24 * 1024 * 1024);
     });
 
