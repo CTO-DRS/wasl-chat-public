@@ -128,7 +128,7 @@ void main() {
   });
 
   test('رسائل المشاركة: التطبيق وكل الحسابات الثمانية', () {
-    expect(appShareMessage('ar'), contains('$developerReleasesUrl/latest'));
+    expect(appShareMessage('ar'), contains('$developerReleasesUrl'));
     final all = AboutDeveloperScreen.allAccountsMessage('en');
     for (final l in developerLinks) {
       expect(all, contains(l.url));

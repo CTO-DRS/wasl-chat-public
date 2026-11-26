@@ -15,7 +15,7 @@ class AppConfig {
 
   /// رابط تحميل آخر إصدار APK (Release في المستودع العام)
   static const apkUrl =
-      'https://github.com/CTO-DRS/waslchat/releases/latest/download/wasl_chat.apk';
+      'https://github.com/CTO-DRS/wasl-chat-public/releases/latest/download/wasl_chat.apk';
 
   /// رابط العودة للتطبيق بعد الدخول بجوجل أو استعادة كلمة المرور
   static String get authRedirect =>

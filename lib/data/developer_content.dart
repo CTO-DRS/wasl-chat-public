@@ -73,7 +73,7 @@ const developerReleasesLatestApi =
     'https://api.github.com/repos/CTO-DRS/wasl-chat-public/releases/latest';
 
 String appShareMessage(String lang) => switch (lang) {
-      'en' => 'Try Wasl Chat, an Arabic-first private messenger. Download it here:\n$developerReleasesUrl/latest',
-      'fr' => 'Essayez Wasl Chat, une messagerie privée arabe d\'abord. Téléchargez-la ici :\n$developerReleasesUrl/latest',
-      _ => 'جرّب «وصل شات»، تطبيق مراسلة عربي بخصوصية حقيقية. حمّله من هنا:\n$developerReleasesUrl/latest',
+      'en' => 'Try Wasl Chat, an Arabic-first private messenger. Download it here:\n$developerReleasesUrl',
+      'fr' => 'Essayez Wasl Chat, une messagerie privée arabe d\'abord. Téléchargez-la ici :\n$developerReleasesUrl',
+      _ => 'جرّب «وصل شات»، تطبيق مراسلة عربي بخصوصية حقيقية. حمّله من هنا:\n$developerReleasesUrl',
     };
