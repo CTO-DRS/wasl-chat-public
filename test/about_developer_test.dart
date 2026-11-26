@@ -61,6 +61,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('dev-qr')), findsOneWidget);
     expect(find.text('https://github.com/CTO-DRS'), findsOneWidget);
+    expect(find.byKey(const ValueKey('dev-open')), findsOneWidget);
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String?;
+      }
+      return null;
+    });
+    await tester.tap(find.byKey(const ValueKey('dev-copy')));
+    await tester.pump();
+    expect(copied, 'https://github.com/CTO-DRS');
+    expect(find.text('تم النسخ'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await expectLater(find.byType(MaterialApp),
+        matchesGoldenFile('goldens/about_developer_qr_ar.png'));
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('dev-avatar')));

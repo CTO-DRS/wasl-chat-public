@@ -1,4 +1,5 @@
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -54,42 +55,10 @@ class AboutDeveloperScreen extends StatelessWidget {
   static void _showQr(BuildContext context, DeveloperLink l, bool ar) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF0B0C24),
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (c) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(l.label(ar),
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                  color: Colors.white, borderRadius: BorderRadius.circular(16)),
-              child: QrImageView(
-                  key: const ValueKey('dev-qr'),
-                  data: l.url,
-                  size: 200,
-                  backgroundColor: Colors.white),
-            ),
-            const SizedBox(height: 12),
-            Text(l.url,
-                textDirection: TextDirection.ltr,
-                style: const TextStyle(color: Color(0xFFA5B4FC), fontSize: 12)),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () => _open(l.url),
-                child: Text(ar ? 'فتح' : 'Open'),
-              ),
-            ),
-          ]),
-        ),
-      ),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      isScrollControlled: true,
+      builder: (c) => _QrSheet(link: l, ar: ar),
     );
   }
 
@@ -292,4 +261,123 @@ class AboutDeveloperScreen extends StatelessWidget {
 /// حد متدرّج قطري (~36% شفافية) لبطاقة المطوّر.
 class GradientBoxBorder {
   static BoxBorder make() => Border.all(color: const Color(0x5C5558C2), width: 1);
+}
+
+/// ورقة QR زجاجية: رمز مولَّد على الجهاز + أزرار «فتح» و«نسخ» متسلسلة.
+class _QrSheet extends StatefulWidget {
+  final DeveloperLink link;
+  final bool ar;
+  const _QrSheet({required this.link, required this.ar});
+
+  @override
+  State<_QrSheet> createState() => _QrSheetState();
+}
+
+class _QrSheetState extends State<_QrSheet> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.link.url));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.link;
+    final ar = widget.ar;
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: const Color(0x5C5558C2)),
+          // زجاج داكن معتم مع لمعة علوية (الأطراف معتمة كي لا تظهر الشاشة خلفها)
+          gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.center,
+              colors: [Color(0xFF1C1D3C), Color(0xFF0B0C24)]),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: const Color(0x40FFFFFF), borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: l.color,
+                  border: Border.all(color: const Color(0x40FFFFFF))),
+              child: Center(child: FaIcon(l.icon, size: 17, color: Colors.white)),
+            ),
+            const SizedBox(width: 10),
+            Text(l.label(ar),
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+          ]),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(20)),
+            child: QrImageView(
+                key: const ValueKey('dev-qr'),
+                data: l.url,
+                size: 200,
+                backgroundColor: Colors.white),
+          ),
+          const SizedBox(height: 12),
+          Text(ar ? 'امسح الرمز بكاميرا هاتفك' : 'Scan with your phone camera',
+              style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 12)),
+          const SizedBox(height: 4),
+          Text(l.url,
+              textDirection: TextDirection.ltr,
+              style: const TextStyle(color: Color(0xFFA5B4FC), fontSize: 12)),
+          const SizedBox(height: 18),
+          Row(children: [
+            Expanded(
+              child: FilledButton.icon(
+                key: const ValueKey('dev-open'),
+                style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                onPressed: () async {
+                  await AboutDeveloperScreen._open(l.url);
+                  if (context.mounted) Navigator.of(context).maybePop();
+                },
+                icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                label: Text(ar ? 'فتح' : 'Open'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const ValueKey('dev-copy'),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0x40FFFFFF)),
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                onPressed: _copy,
+                icon: Icon(_copied ? Icons.check_rounded : Icons.copy_rounded, size: 18),
+                label: Text(_copied
+                    ? (ar ? 'تم النسخ' : 'Copied')
+                    : (ar ? 'نسخ' : 'Copy')),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
 }

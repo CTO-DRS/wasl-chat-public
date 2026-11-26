@@ -52,6 +52,18 @@ Widget renderHarness(Widget child, ThemeData base) {
     ),
     // material_ui يعيد تركيب textTheme داخليًا فيسقط fontFamilyFallback عن
     // أنماط البلاطات؛ نمرّر الخط صراحةً عبر listTileTheme الذي يتقدّم عليها.
+    filledButtonTheme: FilledButtonThemeData(
+      style: (base.filledButtonTheme.style ?? const ButtonStyle()).copyWith(
+        textStyle: WidgetStatePropertyAll(
+            const TextStyle(fontFamily: 'Roboto', fontFamilyFallback: fb, fontWeight: FontWeight.w700)),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: (base.outlinedButtonTheme.style ?? const ButtonStyle()).copyWith(
+        textStyle: WidgetStatePropertyAll(
+            const TextStyle(fontFamily: 'Roboto', fontFamilyFallback: fb, fontWeight: FontWeight.w700)),
+      ),
+    ),
     listTileTheme: base.listTileTheme.copyWith(
       titleTextStyle: base.textTheme.titleMedium
           ?.copyWith(fontFamily: 'Roboto', fontFamilyFallback: fb),
