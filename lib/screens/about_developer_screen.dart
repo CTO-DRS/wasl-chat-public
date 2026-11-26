@@ -1,114 +1,295 @@
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../config.dart';
 import '../services/locale_service.dart';
 import '../theme.dart';
 
-/// روابط المطوّر الرسمية — مصدر واحد للشاشة والاختبارات.
+/// حساب رسمي للمطوّر — مصدر واحد للشاشة والاختبارات.
 class DeveloperLink {
   final String id;
-  final String label;
-  final IconData icon;
+  final String labelAr;
+  final String labelEn;
+  final FaIconData icon;
+  final Color color;
   final String url;
-  const DeveloperLink(this.id, this.label, this.icon, this.url);
+  const DeveloperLink(this.id, this.labelAr, this.labelEn, this.icon, this.color, this.url);
+  String label(bool ar) => ar ? labelAr : labelEn;
 }
 
-const developerName = 'CTO: DRS';
+const developerName = 'CTO.DRS';
 const developerSite = 'https://cto-drs.com';
 
+/// الترتيب والألوان حسب مرجع NeoKey.
 const developerLinks = <DeveloperLink>[
-  DeveloperLink('web', 'cto-drs.com', Icons.language_rounded, developerSite),
-  DeveloperLink('github', 'GitHub', Icons.code_rounded, 'https://github.com/CTO-DRS'),
-  DeveloperLink('x', 'X', Icons.alternate_email_rounded, 'https://x.com/cto_drs'),
-  DeveloperLink('instagram', 'Instagram', Icons.photo_camera_rounded,
-      'https://www.instagram.com/cto.drs'),
-  DeveloperLink('tiktok', 'TikTok', Icons.music_note_rounded, 'https://www.tiktok.com/@cto.drs'),
-  DeveloperLink('youtube', 'YouTube', Icons.play_circle_rounded, 'https://youtube.com/@cto-drs'),
-  DeveloperLink('telegram', 'Telegram', Icons.send_rounded, 'https://t.me/CTO_DRS'),
-  DeveloperLink('whatsapp', 'WhatsApp Business', Icons.chat_rounded,
-      'https://wa.me/message/MVTVWPOPFOVFF1'),
+  DeveloperLink('whatsapp', 'واتساب', 'WhatsApp', FontAwesomeIcons.whatsapp,
+      Color(0xFF25D366), 'https://wa.me/message/MVTVWPOPFOVFF1'),
+  DeveloperLink('telegram', 'تيليجرام', 'Telegram', FontAwesomeIcons.telegram,
+      Color(0xFF229ED9), 'https://t.me/CTO_DRS'),
+  DeveloperLink('tiktok', 'تيك توك', 'TikTok', FontAwesomeIcons.tiktok,
+      Color(0xFF111111), 'https://www.tiktok.com/@cto.drs'),
+  DeveloperLink('instagram', 'إنستغرام', 'Instagram', FontAwesomeIcons.instagram,
+      Color(0xFFE1306C), 'https://www.instagram.com/cto.drs'),
+  DeveloperLink('x', 'إكس', 'X', FontAwesomeIcons.xTwitter, Color(0xFF000000),
+      'https://x.com/cto_drs'),
+  DeveloperLink('youtube', 'يوتيوب', 'YouTube', FontAwesomeIcons.youtube,
+      Color(0xFFFF0000), 'https://youtube.com/@cto-drs'),
+  DeveloperLink('github', 'GitHub', 'GitHub', FontAwesomeIcons.github,
+      Color(0xFF24292F), 'https://github.com/CTO-DRS'),
+  DeveloperLink('web', 'الموقع', 'Website', FontAwesomeIcons.globe, Color(0xFF4F46E5),
+      developerSite),
 ];
 
-/// شاشة «عن المطوّر» — بطاقة أنيقة بصورة دائرية وصف أيقونات الروابط.
+const _avatarAsset = 'assets/developer/dev-avatar.jpg';
+
+/// شاشة «عن المطوّر» — لوحة زجاجية داكنة بصورة دائرية وشبكة حسابات 4×2.
 class AboutDeveloperScreen extends StatelessWidget {
   const AboutDeveloperScreen({super.key});
 
   static Future<void> _open(String url) =>
       launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
 
-  @override
-  Widget build(BuildContext context) {
-    final ar = LocaleService.lang.value == 'ar';
-    return Scaffold(
-      appBar: AppBar(title: Text(ar ? 'عن المطوّر' : 'About the developer')),
-      body: ListView(
-        padding: const EdgeInsets.all(WaslSpace.xxl),
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(WaslSpace.xxl, 28, WaslSpace.xxl, WaslSpace.xxl),
-            decoration: BoxDecoration(
-              color: context.glass,
-              borderRadius: BorderRadius.circular(WaslRadius.xl),
-              border: Border.all(color: context.hairline.withValues(alpha: 0.5)),
+  static void _showQr(BuildContext context, DeveloperLink l, bool ar) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF0B0C24),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(l.label(ar),
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                  color: Colors.white, borderRadius: BorderRadius.circular(16)),
+              child: QrImageView(
+                  key: const ValueKey('dev-qr'),
+                  data: l.url,
+                  size: 200,
+                  backgroundColor: Colors.white),
             ),
-            child: Column(children: [
-              Container(
-                padding: const EdgeInsets.all(3),
-                decoration: BoxDecoration(
-                    shape: BoxShape.circle, gradient: WaslColors.gradient),
-                child: Semantics(
-                  label: developerName,
-                  image: true,
-                  child: const CircleAvatar(
-                    radius: 54,
-                    backgroundImage: AssetImage('assets/developer/dev-avatar.jpg'),
-                  ),
-                ),
+            const SizedBox(height: 12),
+            Text(l.url,
+                textDirection: TextDirection.ltr,
+                style: const TextStyle(color: Color(0xFFA5B4FC), fontSize: 12)),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => _open(l.url),
+                child: Text(ar ? 'فتح' : 'Open'),
               ),
-              const SizedBox(height: WaslSpace.lg),
-              Text(developerName,
-                  textDirection: TextDirection.ltr,
-                  style: TextStyle(
-                      fontSize: WaslFont.titleLarge,
-                      fontWeight: FontWeight.w800,
-                      color: context.textPrimary)),
-              const SizedBox(height: WaslSpace.xs),
-              Text(ar ? 'تطوير CTO: DRS' : 'Developed by CTO: DRS',
-                  style: TextStyle(fontSize: WaslFont.body, color: context.textSecondary)),
-              const SizedBox(height: WaslSpace.xl),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: WaslSpace.md,
-                runSpacing: WaslSpace.md,
-                children: [
-                  for (final l in developerLinks)
-                    Tooltip(
-                      message: l.label,
-                      child: Semantics(
-                        button: true,
-                        label: l.label,
-                        child: InkResponse(
-                          key: ValueKey('dev-link-${l.id}'),
-                          onTap: () => _open(l.url),
-                          radius: 28,
-                          child: Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: WaslColors.indigo.withValues(alpha: 0.14),
-                            ),
-                            child: Icon(l.icon, size: 22, color: WaslColors.teal),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ]),
-          ),
-        ],
+            ),
+          ]),
+        ),
       ),
     );
   }
+
+  static void _showPhoto(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (c) => GestureDetector(
+        onTap: () => Navigator.of(c).pop(),
+        child: Center(
+          child: InteractiveViewer(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Image.asset(_avatarAsset, fit: BoxFit.contain),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ar = LocaleService.lang.value == 'ar';
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final fg = dark ? const Color(0xFFDDE1EA) : WaslColors.ink;
+    return Scaffold(
+      extendBodyBehindAppBar: false,
+      appBar: AppBar(title: Text(ar ? 'عن المطوّر' : 'About the developer')),
+      body: Container(
+        decoration: dark
+            ? const BoxDecoration(
+                gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF05061A), Color(0xFF0D0A2E)]))
+            : null,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+          children: [
+            Row(children: [
+              Container(
+                  width: 4,
+                  height: 20,
+                  decoration: BoxDecoration(
+                      color: const Color(0xFF6D3FC9),
+                      borderRadius: BorderRadius.circular(2))),
+              const SizedBox(width: 10),
+              Text(ar ? 'عن المطوّر' : 'About the developer',
+                  style: TextStyle(color: fg, fontSize: 17, fontWeight: FontWeight.w700)),
+              const SizedBox(width: 12),
+              const Expanded(child: Divider(height: 1, color: Color(0x40A78BFA))),
+            ]),
+            const SizedBox(height: 16),
+            _card(context, ar),
+            const SizedBox(height: 28),
+            Center(
+              child: Text(
+                  ar
+                      ? 'وصل شات • الإصدار ${AppConfig.appVersion}'
+                      : 'Wasl Chat • Version ${AppConfig.appVersion}',
+                  style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _card(BuildContext context, bool ar) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        color: dark ? const Color(0xB80B0C24) : Colors.white,
+        border: GradientBoxBorder.make(),
+      ),
+      clipBehavior: Clip.antiAlias,
+      padding: const EdgeInsets.all(16),
+      child: Stack(clipBehavior: Clip.none, children: [
+        // لمعة علوية داخل حدود البطاقة
+        Positioned(
+          left: -16,
+          right: -16,
+          top: -16,
+          height: 60,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  dark ? const Color(0x1CFFFFFF) : const Color(0x146366F1),
+                  Colors.transparent
+                ],
+              ),
+            ),
+          ),
+        ),
+        Column(children: [
+          const SizedBox(height: 4),
+          _avatar(context),
+          const SizedBox(height: 14),
+          Text(developerName,
+              textDirection: TextDirection.ltr,
+              style: TextStyle(
+                  color: dark ? Colors.white : WaslColors.ink,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(ar ? 'مطوّر تطبيقات • استشارات تقنية' : 'App developer • Tech consulting',
+              style: TextStyle(
+                  color: dark ? const Color(0xFFA5B4FC) : WaslColors.indigo, fontSize: 13)),
+          const SizedBox(height: 20),
+          LayoutBuilder(builder: (context, c) {
+            final w = c.maxWidth / 4;
+            return Wrap(runSpacing: 16, children: [
+              for (final l in developerLinks)
+                SizedBox(width: w, child: _cell(context, l, ar, dark)),
+            ]);
+          }),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _avatar(BuildContext context) {
+    return GestureDetector(
+      key: const ValueKey('dev-avatar'),
+      onTap: () => _showPhoto(context),
+      child: SizedBox(
+        width: 96,
+        height: 96,
+        child: Stack(children: [
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF6366F1), Color(0xFF06B6D4), Color(0xFFA855F7)],
+              ),
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF161437)),
+              child: const CircleAvatar(radius: 45, backgroundImage: AssetImage(_avatarAsset)),
+            ),
+          ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF1D9BF0),
+                  border: Border.all(color: const Color(0xFF161437), width: 2)),
+              child: const Icon(Icons.check_rounded, size: 16, color: Colors.white),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _cell(BuildContext context, DeveloperLink l, bool ar, bool dark) {
+    return Semantics(
+      button: true,
+      label: l.label(ar),
+      child: InkWell(
+        key: ValueKey('dev-link-${l.id}'),
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _showQr(context, l, ar),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: l.color,
+              border: Border.all(color: const Color(0x40FFFFFF)),
+            ),
+            child: Center(child: FaIcon(l.icon, size: 22, color: Colors.white)),
+          ),
+          const SizedBox(height: 6),
+          Text(l.label(ar),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: dark ? const Color(0xFFCBD5E1) : WaslColors.ink2, fontSize: 11)),
+        ]),
+      ),
+    );
+  }
+}
+
+/// حد متدرّج قطري (~36% شفافية) لبطاقة المطوّر.
+class GradientBoxBorder {
+  static BoxBorder make() => Border.all(color: const Color(0x5C5558C2), width: 1);
 }

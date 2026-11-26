@@ -11,16 +11,16 @@ void main() {
 
   test('الروابط الثمانية الرسمية حرفياً', () {
     expect(developerLinks.map((l) => l.url).toList(), [
-      'https://cto-drs.com',
-      'https://github.com/CTO-DRS',
-      'https://x.com/cto_drs',
-      'https://www.instagram.com/cto.drs',
-      'https://www.tiktok.com/@cto.drs',
-      'https://youtube.com/@cto-drs',
-      'https://t.me/CTO_DRS',
       'https://wa.me/message/MVTVWPOPFOVFF1',
+      'https://t.me/CTO_DRS',
+      'https://www.tiktok.com/@cto.drs',
+      'https://www.instagram.com/cto.drs',
+      'https://x.com/cto_drs',
+      'https://youtube.com/@cto-drs',
+      'https://github.com/CTO-DRS',
+      'https://cto-drs.com',
     ]);
-    expect(developerName, 'CTO: DRS');
+    expect(developerName, 'CTO.DRS');
   });
 
   test('صورة المطوّر مضمّنة كأصل', () async {
@@ -43,7 +43,7 @@ void main() {
             tester.element(find.byType(AboutDeveloperScreen)));
       });
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('CTO: DRS'), findsOneWidget);
+      expect(find.text('CTO.DRS'), findsOneWidget);
       for (final l in developerLinks) {
         expect(find.byKey(ValueKey('dev-link-${l.id}')), findsOneWidget);
       }
@@ -51,4 +51,22 @@ void main() {
           matchesGoldenFile('goldens/about_developer_${n}_ar.png'));
     });
   }
+
+  testWidgets('النقر على حساب يفتح ورقة QR وعلى الصورة يفتح العارض', (tester) async {
+    tester.view.physicalSize = const Size(390 * 3, 844 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(renderHarness(const AboutDeveloperScreen(), WaslTheme.dark));
+    await tester.tap(find.byKey(const ValueKey('dev-link-github')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('dev-qr')), findsOneWidget);
+    expect(find.text('https://github.com/CTO-DRS'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('dev-avatar')));
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+  });
 }

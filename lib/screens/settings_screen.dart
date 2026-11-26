@@ -302,7 +302,7 @@ class SettingsScreen extends StatelessWidget {
                 'جرّب الميزات قبل الجميع', () => const BetaScreen()),
             _nav(context, Icons.person_rounded, WaslColors.indigo,
                 LocaleService.lang.value == 'ar' ? 'عن المطوّر' : 'About the developer',
-                'CTO: DRS', () => const AboutDeveloperScreen()),
+                'CTO.DRS', () => const AboutDeveloperScreen()),
             SheetTile(
               icon: Icons.system_update_alt_rounded,
               color: WaslColors.indigo,

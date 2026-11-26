@@ -34,6 +34,11 @@ Future<void> loadRenderFonts() async {
   await load('$noto/NotoSansArabic-ExtraBold.ttf', 'Noto Sans Arabic');
   await load('$noto/NotoSansArabic-Black.ttf', 'Noto Sans Arabic');
   await load('$cache/artifacts/material_fonts/MaterialIcons-Regular.otf', 'MaterialIcons');
+  // أيقونات العلامات التجارية (Font Awesome) من حزمة font_awesome_flutter
+  final fa = Platform.environment['FA_FONTS'] ?? '/home/sandbox/.pub-cache/hosted/pub.dev/font_awesome_flutter-11.0.0/lib/fonts';
+  await load('$fa/Font-Awesome-7-Brands-Regular-400.otf', 'packages/font_awesome_flutter/FontAwesomeBrands');
+  await load('$fa/Font-Awesome-7-Free-Solid-900.otf', 'packages/font_awesome_flutter/FontAwesomeSolid');
+  await load('$fa/Font-Awesome-7-Free-Regular-400.otf', 'packages/font_awesome_flutter/FontAwesomeRegular');
 }
 
 Widget renderHarness(Widget child, ThemeData base) {
