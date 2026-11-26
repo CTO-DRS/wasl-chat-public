@@ -1,0 +1,5786 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:cryptography/cryptography.dart' show SecretKey;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:material_ui/material_ui.dart';
+import 'dart:math' show cos, log, pi, tan;
+import 'dart:math' as math;
+import 'package:file_picker/file_picker.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../config.dart';
+import '../services/ai_service.dart';
+import '../services/album_service.dart';
+import '../services/app_lock_service.dart';
+import '../services/block_service.dart';
+import '../services/call_logic.dart';
+import '../services/call_service.dart';
+import '../services/channel_bell_service.dart';
+import '../services/channel_stats_service.dart';
+import '../services/bot_catalog_service.dart';
+import '../services/catalog_bot_runner.dart';
+import '../services/catalog_bot_store.dart';
+import '../services/shared_image_hub.dart';
+import '../services/e2e_service.dart';
+import '../services/l10n.dart';
+import '../services/locale_service.dart';
+import '../services/metrics_service.dart';
+import '../services/export_service.dart';
+import '../services/forward_service.dart';
+import '../services/image_edit_service.dart';
+import '../services/link_preview_service.dart';
+import '../services/daily_summary_service.dart';
+import '../services/weekly_summary_service.dart';
+import '../services/local_ai_service.dart';
+import '../services/local_translate_service.dart';
+import '../services/offline_queue_service.dart';
+import '../services/promise_reminder_service.dart';
+import '../services/style_assist_service.dart';
+import '../services/saved_service.dart';
+import '../services/smart_search_service.dart';
+import '../services/voice_read_service.dart';
+import '../services/webio/web_files.dart';
+import '../services/media_limits.dart';
+import '../services/media_service.dart';
+import '../services/moderation_service.dart';
+import '../services/presence_service.dart';
+import '../services/privacy_service.dart';
+import '../services/adaptive_actions.dart';
+import '../services/push_service.dart';
+import '../theme.dart';
+import '../widgets/location_picker_sheet.dart';
+import '../widgets/tone_picker_sheet.dart';
+import '../services/app_studio_service.dart';
+import '../widgets/studio_backdrop.dart';
+import 'chat_studio_screen.dart';
+import '../widgets/bubble_layout.dart';
+import '../widgets/common.dart';
+import '../services/media_preview_service.dart';
+import '../services/video_preview_service.dart';
+import '../widgets/group_avatar.dart';
+import '../widgets/link_preview_card.dart';
+import '../widgets/media_bubbles.dart';
+import '../widgets/motion.dart';
+import '../widgets/shield_report_sheet.dart';
+import '../widgets/report_dialog.dart';
+import 'album_preview_screen.dart';
+import 'ask_wasl_screen.dart';
+import 'call_screen.dart';
+import 'contact_screen.dart';
+import 'group_info_screen.dart';
+import 'image_editor_screen.dart';
+import 'media_gallery_screen.dart';
+import 'video_screen.dart';
+import 'verify_qr_screen.dart';
+import 'voice_room_screen.dart';
+import '../widgets/wasl_sheet.dart';
+import '../services/post_build_coalescer.dart';
+import '../widgets/quick_reply_row.dart';
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({
+    super.key,
+    required this.conversationId,
+    required this.title,
+    this.isGroup = false,
+    this.otherId,
+    this.isChannel = false,
+    this.canPost = true,
+    this.encrypted = false,
+    this.starredOnly = false,
+    this.isSaved = false,
+    this.isBot = false,
+    this.officialVerified = false,
+    this.focusMessageId,
+    this.initialAvatar,
+  });
+
+  /// صورة الطرف الآخر كما ظهرت في القائمة — تُعرض فوراً قبل تحميل الميتا
+  final String? initialAvatar;
+  final String conversationId;
+  final String title;
+  final bool isGroup;
+  final String? otherId;
+  final bool isChannel;
+  final bool canPost;
+
+  /// تشفير بين الطرفين (خاص + مجموعات خاصة + المحفوظة فقط؛ القنوات وغرف
+  /// المجتمعات ومحادثات البوتات لا)
+  final bool encrypted;
+
+  /// يفتح المحادثة على الرسائل المميزة بنجمة فقط
+  final bool starredOnly;
+
+  /// شارة التوثيق الرسمية (0.14.0): تُمرَّر للقنوات المستقلة الموثّقة وغرف
+  /// المجتمعات الموثّقة — تظهر بجانب العنوان في رأس الشاشة فقط.
+  final bool officialVerified;
+
+  /// «رسائلي المحفوظة»: سحابة شخصية — لا معلومات مجموعة ولا مشاركون
+  final bool isSaved;
+
+  /// الطرف الآخر بوت (محادثة مباشرة غير مشفرة بالتصميم — البوت يقرأها)
+  final bool isBot;
+
+  /// القفز إلى رسالة محددة عند الفتح (معرض الوسائط — 0.21.0):
+  /// يمرر القائمة على موضع الرسالة ويبرزها لحظة
+  final String? focusMessageId;
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerProviderStateMixin {
+  final _text = TextEditingController();
+  final _recorder = AudioRecorder();
+  final _picker = ImagePicker();
+  late final Stream<List<Map<String, dynamic>>> _stream;
+  final String _me = supabase.auth.currentUser!.id;
+
+  Map<String, String> _names = {};
+  late String _title = widget.title;
+
+  // الرد والتعديل والتفاعلات
+  Map<String, dynamic>? _replyTo;
+  Map<String, dynamic>? _editing;
+  Map<String, Map<String, dynamic>> _byId = {};
+  StreamSubscription<List<Map<String, dynamic>>>? _reactSub;
+  Map<String, Map<String, String>> _reactions = {}; // msgId -> (userId -> emoji)
+
+  /// الإيموجي المفكوك: النص المشفر ← الإيموجي الصريح (القديم الصريح يمر فوراً)
+  final Map<String, String> _emojiPlain = {};
+  // الرسائل المختفية والنجوم وصورة الطرف الآخر
+  int? _disappear;
+  Set<String> _stars = {};
+  late bool _starredOnly = widget.starredOnly;
+  String? _otherAvatar;
+
+  /// مسار صورة المجموعة المشفرة (conversations.avatar_url)
+  String? _groupAvatarPath;
+
+  // البحث داخل المحادثة
+  bool _searching = false;
+  final _searchCtrl = TextEditingController();
+  String get _query => _searchCtrl.text.trim().toLowerCase();
+
+  // مرشحات البحث (2.4.0): نوع النتائج + مخزون عميق حتى 1000 رسالة يُجلب
+  // مرة عند فتح البحث — والأنواع تشمل الروابط والأرقام بتعابير نمطية
+  String _searchKind = 'all';
+  List<Map<String, dynamic>> _searchCorpus = const [];
+
+  /// ج4: جلب الرسائل الأقدم لمخزون البحث العميق جارٍ (مؤشر هيكل أعلى القائمة)
+  bool _corpusLoading = false;
+  static const _searchKinds = <(String, String, IconData)>[
+    ('all', 'الكل', Icons.search_rounded),
+    ('text', 'نصوص', Icons.chat_bubble_outline_rounded),
+    ('image', 'صور', Icons.image_outlined),
+    ('video', 'فيديو', Icons.movie_outlined),
+    ('file', 'ملفات', Icons.insert_drive_file_outlined),
+    ('voice', 'صوتيات', Icons.graphic_eq_rounded),
+    ('location', 'مواقع', Icons.location_on_outlined),
+    ('link', 'روابط', Icons.link_rounded),
+    ('phone', 'أرقام', Icons.phone_outlined),
+  ];
+  static final RegExp _linkRe =
+      RegExp(r'(https?://|www\.)[^\s]+', caseSensitive: false);
+  static final RegExp _phoneRe = RegExp(r'\+?\d[\d\s\-()]{7,}\d');
+
+  // الحظر: أنا حظرتُ الطرف الآخر في محادثة فردية؟
+  bool _iBlockedPeer = false;
+
+  // هل الطرف الآخر موثّق بمسح QR على هذا الجهاز؟ (للمحادثات الفردية المشفّرة)
+  bool _verified = false;
+
+  // منع لقطات الشاشة لهذه المحادثة (أندرويد: FLAG_SECURE)
+  bool _noScreenshots = false;
+
+  // الكتم في غرف المجتمعات (ترحيل 023): نهاية الكتم إن كنت مكتوماً هنا
+  DateTime? _mutedUntil;
+  bool get _isMuted => _mutedUntil != null && _mutedUntil!.isAfter(DateTime.now());
+
+  static const _quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  bool _recording = false;
+  bool _uploading = false;
+
+  /// مسح المحادثة الشخصي (0.20.0 — ترحيل 031): الرسائل قبله مخفية عني حصراً
+  DateTime? _clearedAt;
+
+  /// حالة مشتقة من الستريم (الردود الذكية + التذكيرات) تُطبَّق بعد الإطار —
+  /// لا setState داخل builder الـStreamBuilder (كان يُظهر شاشة الخطأ الحمراء)
+  late final PostBuildCoalescer<List<Map<String, dynamic>>> _derivedFromStream =
+      PostBuildCoalescer((all) {
+    if (!mounted) return;
+    _refreshSmartReplies(all);
+    _scanPromises(all);
+  });
+
+  /// آخر نسخة كاملة من الرسائل (للتصدير النصي من قائمة ⋮)
+  List<Map<String, dynamic>> _allMsgs = const [];
+
+  // استوديو المحادثة (1.13.0): تخصيص هذه المحادثة فوق اختيار التطبيق
+  late final ValueNotifier<ChatStyle> _chatStyle =
+      ChatStudioService.of(widget.conversationId);
+  void _onStudio() {
+    if (mounted) setState(() {});
+  }
+
+  BubbleLook get _look =>
+      BubbleLook.resolve(AppStudioService.style.value, _chatStyle.value);
+
+  /// حبر فقاعتي محسوب من تباين لونها (2.5.0) — يُخزَّن حسب الشكل الحالي
+  /// فلا يُعاد حساب الإضاءة لكل فقاعة في كل إطار
+  _OwnInk get _ink {
+    final look = _look;
+    final cached = _inkCache;
+    if (cached != null && cached.$1 == look.ownColor && cached.$2 == look.gradient) {
+      return cached.$3;
+    }
+    final ink = _OwnInk(
+      primary: look.ownInk,
+      secondary: look.ownInkSecondary,
+      tertiary: look.ownInkTertiary,
+      readTick: look.ownReadTick,
+      quoteFill: look.ownQuoteFill,
+    );
+    _inkCache = (look.ownColor, look.gradient, ink);
+    return ink;
+  }
+
+  (Color, LinearGradient?, _OwnInk)? _inkCache;
+
+  // القفز والإبراز (0.21.0): معرض الوسائط يفتح المحادثة على وسيط محدد
+  final _itemScroll = ItemScrollController();
+
+  // 2.5.0 (ج2): زر «إلى الأحدث» — يظهر حين يبتعد المستخدم عن آخر الرسائل
+  // ويعدّ الرسائل الواردة أثناء ابتعاده
+  final _itemPositions = ItemPositionsListener.create();
+  final _awayFromBottom = ValueNotifier<bool>(false);
+  final _newWhileAway = ValueNotifier<int>(0);
+  String? _newestSeenId;
+
+  void _onPositions() {
+    final pos = _itemPositions.itemPositions.value;
+    if (pos.isEmpty) return;
+    // القائمة معكوسة: العنصر 0 هو الأحدث (أسفل الشاشة)
+    final minIdx = pos.map((p) => p.index).reduce(math.min);
+    final away = minIdx > 1;
+    void apply() {
+      if (!mounted) return;
+      if (_awayFromBottom.value != away) _awayFromBottom.value = away;
+      if (!away && _newWhileAway.value != 0) _newWhileAway.value = 0;
+    }
+
+    // المواضع قد تُبلَّغ أثناء التخطيط — نؤجل التحديث لما بعد الإطار
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => apply());
+    } else {
+      apply();
+    }
+  }
+
+  /// يُستدعى مع كل تحديث للقائمة: يعدّ الواردات الجديدة إن كان المستخدم بعيداً
+  void _trackNewWhileAway(List<List<Map<String, dynamic>>> items) {
+    if (items.isEmpty) return;
+    final newestId = items.first.first['id'] as String?;
+    final prev = _newestSeenId;
+    _newestSeenId = newestId;
+    if (prev == null || prev == newestId || !_awayFromBottom.value) return;
+    var added = 0;
+    for (final g in items) {
+      if (g.any((m) => m['id'] == prev)) break;
+      if (g.first['sender_id'] != _me) added++;
+    }
+    if (added > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _newWhileAway.value += added;
+      });
+    }
+  }
+
+  Future<void> _jumpToBottom() async {
+    _newWhileAway.value = 0;
+    try {
+      if (WaslReducedMotion.of(context)) {
+        _itemScroll.jumpTo(index: 0);
+      } else {
+        await _itemScroll.scrollTo(
+            index: 0, duration: WaslMotion.slow, curve: WaslMotion.emphasized);
+      }
+    } catch (_) {}
+  }
+  bool _jumpDone = false;
+  String? _highlightId;
+
+  // جرس القنوات (0.21.0): حالة هذه القناة تُحمّل مرة وتحدّث من الحوار
+  String _bell = 'all';
+  bool _bellLoaded = false;
+
+  // القراءة الصوتية (0.21.0)
+  bool _ttsBusy = false;
+
+  /// مفتاح «عرض مرة واحدة» في ورقة المرفقات — يسري على الصورة/الفيديو التالي
+  bool _viewOnce = false;
+  DateTime? _recStart;
+  Timer? _ticker;
+
+  // ---------- المرحلة 5: وصل AI المحلي والبحث الذكي والترجمة الفورية ----------
+  /// ذاكرة «فُتح عنصر مسبقاً» حتى لا تُعاد حركة الدخول عند كل إعادة بناء
+  final Set<String> _motionSeen = {};
+
+  /// الترجمة الفورية لهذه المحادثة (مفتاح لكل محادثة — تراه أنت وحدك)
+  bool _autoTranslate = false;
+  static const _autoTranslateKeyPrefix = 'autotranslate_';
+  bool _translateConfirming = false; // حوار موافقة مفتوح لا يُستدعى مرتين
+
+  /// الترجمات المفكوك ذاكرةً: معرف الرسالة ← الترجمة (جلسة واحدة)
+  final Map<String, String> _translations = {};
+  final Set<String> _translating = {};
+
+  /// تفريغ الصوتيات ذاكرةً: معرف الرسالة ← التفريغ (جلسة واحدة)
+  final Map<String, String> _transcripts = {};
+  final Set<String> _transcribing = {};
+
+  /// الردود الذكية المحلية (محسوبة من آخر رسالة وردت)
+  List<String> _smartReplies = const [];
+  String? _repliesFor;
+
+  /// الملخص اليومي المحلي (المرحلة 9 أ — 0.22.0): يُبنى عند أول فتح في اليوم
+  /// ويُخزن في المخزن الآمن على الجهاز حصراً — بلا أي شبكة
+  final DailySummaryStore _dailyStore = DailySummaryStore();
+  bool _dailyTried = false;
+  final WeeklySummaryStore _weeklyStore = WeeklySummaryStore();
+
+  /// التذكيرات الذكية (المرحلة 9 ب — 0.23.0): مواعيد مكتشفة من الوارد
+  /// ومُستبعداها المحفوظان على جهازك — نعرض أحدث كشف فقط
+  List<DetectedPromise> _promises = const [];
+  Set<String> _dismissedPromises = {};
+
+  // التشفير بين الطرفين (المحادثات الخاصة والمجموعات الخاصة)
+  // نص فك التشفير لكل نص مشفّر: ciphertext -> النص الصريح (يتغيّر النص المشفّر عند التعديل)
+  final Map<String, String> _plain = {};
+  bool get _e2e => widget.encrypted && !widget.isChannel;
+
+  /// مفتاح المحادثة: اشتقاق ECDH للخاص، أو مفتاح المجموعة للمجموعة الخاصة
+  Future<SecretKey?> _convKey() async {
+    if (!widget.isGroup) {
+      final other = widget.otherId;
+      if (other == null) return null;
+      return E2eService.dmKey(widget.conversationId, other);
+    }
+    return E2eService.groupKey(widget.conversationId);
+  }
+
+  /// يفك نصاً مشفّراً واحداً (للمحادثات الخاصة: جلسة متدرجة v2 أو ثابت v1،
+  /// وللمجموعات: يجرّب كل إصدارات المفتاح المعروفة)
+  Future<String?> _decrypt(String content) async {
+    if (!widget.isGroup) {
+      final other = widget.otherId;
+      if (other == null) return null;
+      return E2eService.decryptDmText(widget.conversationId, other, content);
+    }
+    var plain = await E2eService.decryptGroupText(widget.conversationId, content);
+    if (plain == null) {
+      // ربما دُوِّر المفتاح أو وصل ظرف جديد: نعيد الجلب مرة
+      E2eService.invalidateGroupKey(widget.conversationId);
+      plain = await E2eService.decryptGroupText(widget.conversationId, content);
+    }
+    return plain;
+  }
+
+  final Set<String> _decrypting = {};
+
+  Future<void> _decryptInto(String content, {String? msgId}) async {
+    if (!_decrypting.add(content)) return;
+    final plain = await _decrypt(content);
+    // mk الوسائط (إن وُجد في الميتا المتدرجة) يُخزّن برسالة عند الفك الأول —
+    // فالوسائط تُقرأ لاحقاً حتى بعد تدوير الجلسة أو إعادة فتح التطبيق
+    if (plain != null && plain.startsWith('{')) {
+      await E2eService.rememberMediaKey(widget.conversationId, msgId, plain);
+    }
+    if (mounted && !_plain.containsKey(content)) {
+      setState(() => _plain[content] = plain ?? '🔒 تعذّر فك التشفير');
+    }
+    _decrypting.remove(content);
+  }
+
+  /// فك إيموجي التفاعلات الواردة (المشفرة v1.) في الخلفية — القديم الصريح لا يحتاج
+  void _decryptReactions(Map<String, Map<String, String>> map) {
+    if (!_e2e) return;
+    final raws = <String>{for (final r in map.values) ...r.values};
+    for (final raw in raws) {
+      if (_emojiPlain.containsKey(raw) || !E2eService.isEncrypted(raw)) continue;
+      unawaited(_decryptEmoji(raw));
+    }
+  }
+
+  Future<void> _decryptEmoji(String raw) async {
+    String? p;
+    if (!widget.isGroup) {
+      final other = widget.otherId;
+      if (other != null) p = await E2eService.decryptDmText(widget.conversationId, other, raw);
+    } else {
+      p = await E2eService.decryptGroupText(widget.conversationId, raw);
+      if (p == null) {
+        // ربما دُوِّر المفتاح: إعادة جلب مرة واحدة (كما في فك الرسائل)
+        E2eService.invalidateGroupKey(widget.conversationId);
+        p = await E2eService.decryptGroupText(widget.conversationId, raw);
+      }
+    }
+    if (!mounted || _emojiPlain.containsKey(raw)) return;
+    setState(() => _emojiPlain[raw] = p ?? '❔');
+  }
+
+  /// الإيموجي الصريح لقيمة مخزنة: المفكوك، أو القديم الصريح فوراً،
+  /// أو '' لحين اكتمال الفك (تُحجب الشارة لحظة بدل إظهار نص مشفر)
+  String _emojiOf(String raw) {
+    final hit = _emojiPlain[raw];
+    if (hit != null) return hit;
+    if (!E2eService.isEncrypted(raw)) return raw;
+    return '';
+  }
+
+  /// النص المعروض لرسالة نصية (null إن كانت ما زالت قيد فك التشفير)
+  String? _textOf(Map<String, dynamic> m) {
+    final raw = m['content'] as String? ?? '';
+    return E2eService.isEncrypted(raw) ? _plain[raw] : raw;
+  }
+
+  /// يفك تشفير الرسائل المشفّرة الجديدة في الخلفية (نصوص وميتا الوسائط —
+  /// المرحلة 10: ميتا الصور والصوتيات أيضاً لأنها تحمل mk الوسيط)
+  void _scheduleDecrypt(List<Map<String, dynamic>> msgs) {
+    if (!_e2e) return;
+    for (final m in msgs) {
+      final t = m['type'] ?? 'text';
+      if (t != 'text' &&
+          t != 'file' &&
+          t != 'video' &&
+          t != 'image' &&
+          t != 'voice' &&
+          t != 'location') {
+        continue;
+      }
+      if (m['deleted_at'] != null) continue;
+      final content = m['content'] as String? ?? '';
+      if (!E2eService.isEncrypted(content) || _plain.containsKey(content)) continue;
+      unawaited(_decryptInto(content, msgId: m['id'] as String?));
+    }
+  }
+
+  /// بيانات ملف/فيديو (الاسم والحجم) من content، بعد فكّها إن كانت مشفّرة
+  Map<String, dynamic>? _metaOf(Map<String, dynamic> m) {
+    final t = _textOf(m);
+    if (t == null || t.isEmpty || !t.startsWith('{')) return null;
+    try {
+      return Map<String, dynamic>.from(jsonDecode(t) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _sizeLabel(int? b) {
+    if (b == null) return '';
+    if (b < 1024 * 1024) return '${(b / 1024).ceil()} ك.ب';
+    return '${(b / (1024 * 1024)).toStringAsFixed(1)} م.ب';
+  }
+
+  // مشاهدات القنوات الكبيرة (المرحلة 4): معرّف الرسالة ← عدد المشاهدات
+  final Map<String, int> _views = {};
+  final Set<String> _viewTracked = {};
+  bool _viewsBusy = false;
+
+  /// مشاهدات القنوات (المرحلة 4): نسجّل مشاهدتي للمنشورات الجديدة
+  /// ونحدّث العدّادات المعروضة تحت كل منشور
+  void _trackChannelViews(List<Map<String, dynamic>> msgs) {
+    if (!widget.isChannel || _viewsBusy) return;
+    final fresh = [
+      for (final m in msgs)
+        if (m['deleted_at'] == null && !_viewTracked.contains(m['id'])) m['id'] as String
+    ];
+    if (fresh.isEmpty && _views.isNotEmpty) return;
+    final allIds = [
+      for (final m in msgs)
+        if (m['deleted_at'] == null) m['id'] as String
+    ];
+    _viewsBusy = true;
+    () async {
+      try {
+        if (fresh.isNotEmpty) {
+          _viewTracked.addAll(fresh);
+          await ChannelStatsService.trackViews(fresh);
+        }
+        final counts = await ChannelStatsService.counts(allIds);
+        if (!mounted) return;
+        setState(() {
+          _views
+            ..clear()
+            ..addAll(counts);
+        });
+      } catch (_) {
+        // بلا ترحيل 025 أو خطأ شبكة: العدّادات تختفي ولا يتعطل شيء
+      } finally {
+        _viewsBusy = false;
+      }
+    }();
+  }
+
+  /// هل أنا مكتوم في مجتمع هذه الغرفة؟ (للافتة داخل المحادثة)
+  Future<void> _loadMuteState() async {
+    try {
+      final v = await supabase.rpc('my_mute_in_conversation',
+          params: {'conv': widget.conversationId});
+      if (!mounted || v == null) return;
+      final until = DateTime.tryParse(v as String);
+      if (until != null && until.isAfter(DateTime.now())) {
+        setState(() => _mutedUntil = until.toLocal());
+      }
+    } catch (_) {}
+  }
+
+  /// طابع مسح المحادثة الشخصي (ترحيل 031): الرسائل قبله تُخفى عني حصراً
+  Future<void> _loadClearedAt() async {
+    try {
+      final row = await supabase
+          .from('conversation_participants')
+          .select('cleared_at')
+          .eq('conversation_id', widget.conversationId)
+          .eq('user_id', _me)
+          .maybeSingle();
+      if (!mounted || row == null) return;
+      final v = row['cleared_at'];
+      if (v is String) setState(() => _clearedAt = DateTime.parse(v));
+    } catch (_) {}
+  }
+
+  /// مسح المحادثة بتأكيد مزدوج — المسح يخفي الرسائل عنك حصراً
+  /// (صفوف الرسائل المشتركة لا تُحذف أبداً)، ويحدّث معاينة القائمة
+  /// وعدّاد غير المقروء عبر my_chats المحدثة.
+  Future<void> _clearConversation() async {
+    final first = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('مسح المحادثة؟'),
+        content: const Text(
+            'ستُخفى كل رسائل هذه المحادثة عنك أنت فقط، ولا تُحذف عن أي عضو آخر، '
+            'ولا تُحذف من الخادم إطلاقاً. ولا يمكن التراجع عن المسح.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: WaslColors.danger),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('متابعة')),
+        ],
+      ),
+    );
+    if (first != true || !mounted) return;
+    final second = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('تأكيد أخير'),
+        content: Text('مسح «$_title» عنك أنت فقط نهائياً؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: WaslColors.danger),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('مسح نهائياً')),
+        ],
+      ),
+    );
+    if (second != true || !mounted) return;
+    try {
+      await supabase.rpc('clear_chat', params: {'p_conv': widget.conversationId});
+      // إخفاء فوري محلي ثم تحديث من الخادم
+      if (mounted) setState(() => _clearedAt = DateTime.now().toUtc());
+    } catch (_) {
+      _snack('تعذّر المسح — تأكد من تشغيل ترحيل 031 على الخادم');
+    }
+  }
+
+  /// ---------- المرحلة 8 ب (0.21.0): القفز والإبراز والقراءة الصوتية والجرس ----------
+
+  /// القفز إلى الرسالة المطلوبة عند الفتح (من معرض الوسائط): يمرر القائمة
+  /// على موضع الرسالة (فهرس مجموعتها في القائمة) ويبرزها 4 ثوانٍ —
+  /// مرة واحدة حصراً: التحديثات اللاحقة لا تعيد القفزة.
+  void _maybeJumpToFocus(List<List<Map<String, dynamic>>> items) {
+    if (_jumpDone) return;
+    final target = widget.focusMessageId;
+    if (target == null) {
+      _jumpDone = true;
+      return;
+    }
+    final idx = items.indexWhere((g) => g.any((m) => m['id'] == target));
+    if (idx < 0) {
+      _jumpDone = true; // الرسالة محذوفة أو قبل المسح الشخصي — بلا قفزة
+      return;
+    }
+    _jumpDone = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await _itemScroll.scrollTo(
+            index: idx, duration: const Duration(milliseconds: 350), alignment: 0.35);
+      } catch (_) {
+        return; // فشل القفز: يبقى السلوك الافتراضي (آخر الرسائل)
+      }
+      if (mounted) {
+        setState(() => _highlightId = target);
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted && _highlightId == target) {
+            setState(() => _highlightId = null);
+          }
+        });
+      }
+    });
+  }
+
+  /// فتح معرض وسائط المحادثة — يمرر معاملات التشفير نفسها للمطابقة
+  void _openMediaGallery() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MediaGalleryScreen(
+          conversationId: widget.conversationId,
+          title: _title,
+          isGroup: widget.isGroup,
+          isChannel: widget.isChannel,
+          encrypted: widget.encrypted,
+          otherId: widget.otherId,
+          isSaved: widget.isSaved,
+          isBot: widget.isBot,
+        ),
+      ),
+    );
+  }
+
+  /// القراءة الصوتية لآخر رسائل المحادثة (TTS عربي على الجهاز حصراً):
+  /// زر واحد — تشغيل يقرأ آخر 10 رسائل مفكوكة، نقر مجدد يوقف.
+  Future<void> _toggleSpeak() async {
+    if (VoiceReadService.speaking.value) {
+      await VoiceReadService.stop();
+      if (mounted) setState(() => _ttsBusy = false);
+      return;
+    }
+    // آخر 10 رسائل مفكوكة بالترتيب الزمني التصاعدي (الأقدم يُقرأ أولاً)
+    final spoken = <(String, String)>[];
+    for (final m in _allMsgs.reversed) {
+      if (m['deleted_at'] != null) continue;
+      final t = _textOf(m);
+      if (t == null || t.isEmpty || t == '🔒 تعذّر فك التشفير' || E2eService.isEncrypted(t)) {
+        continue;
+      }
+      spoken.insert(0, (_senderName(m['sender_id'] as String? ?? ''), t));
+      if (spoken.length >= 10) break;
+    }
+    if (spoken.isEmpty) {
+      _snack('لا رسائل نصية مفكوكة للقراءة بعد');
+      return;
+    }
+    final text = VoiceReadService.buildSpokenText(spoken, isGroup: widget.isGroup && !widget.isChannel);
+    if (mounted) setState(() => _ttsBusy = true);
+    final ok = await VoiceReadService.speak(text);
+    if (!mounted) return;
+    setState(() => _ttsBusy = false);
+    if (!ok) _snack('القراءة غير مدعومة على هذا الجهاز — أو لا يوجد محرك عربي');
+  }
+
+  /// حالة جرس القناة — تُحمّل مرة (وهبوط للافتراضي بلا ترحيل 032)
+  Future<void> _loadBell() async {
+    if (_bellLoaded || !widget.isChannel) return;
+    _bellLoaded = true;
+    try {
+      final rows = await supabase
+          .from('conversation_participants')
+          .select('bell')
+          .eq('conversation_id', widget.conversationId)
+          .eq('user_id', _me)
+          .limit(1);
+      if (mounted && rows.isNotEmpty) {
+        setState(() => _bell = ChannelBellService.normalize(
+            (rows.first as Map)['bell'] as String?));
+      }
+    } catch (_) {
+      // عمود bell غير موجود بعد (الترحيل 032 لم يُشغّل) — الافتراضي all
+    }
+  }
+
+  /// حوار اختيار جرس القناة: كل المنشورات / المثبتة فقط / صمت
+  Future<void> _showBellDialog() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(WaslRadius.xl))),
+      builder: (ctx) => SafeArea(
+        child: Wrap(children: [
+          const ListTile(title: Text('إشعارات هذه القناة',
+              style: TextStyle(fontWeight: FontWeight.w800))),
+          for (final (v, icon, label) in const [
+            ('all', Icons.notifications_active_outlined, 'كل المنشورات'),
+            ('pinned', Icons.push_pin_outlined, 'المنشورات المثبتة فقط'),
+            ('mute', Icons.notifications_off_outlined, 'صمت — لا إشعارات'),
+          ])
+            ListTile(
+              leading: Icon(icon,
+                  color: _bell == v ? WaslColors.teal : null),
+              title: Text(label),
+              trailing: _bell == v
+                  ? const Icon(Icons.check_rounded,
+                      size: 18, color: WaslColors.teal)
+                  : null,
+              onTap: () async {
+                Navigator.pop(ctx);
+                final old = _bell;
+                if (mounted) setState(() => _bell = v);
+                try {
+                  await ChannelBellService.set(widget.conversationId, v);
+                  if (mounted) {
+                    _snack(v == 'mute'
+                        ? 'صمتت هذه القناة — لن تصلك بياناتها أصلاً'
+                        : v == 'pinned'
+                            ? 'ستنبّهك المنشورات المثبتة فقط'
+                            : 'ستنبهك كل منشورات القناة');
+                  }
+                } catch (_) {
+                  if (mounted) {
+                    setState(() => _bell = old);
+                    _snack('تعذّر الحفظ — تأكد من تشغيل الترحيل 032 والاتصال');
+                  }
+                }
+              },
+            ),
+        ]),
+      ),
+    );
+  }
+
+  /// تصدير المحادثة نصاً — كل النصوص من المفكوك على جهازك، والملف لا يغادر
+  /// جهازك إلا بمشاركتك أنت (تقرير الشفافية: مسار محلي صريح)
+  Future<void> _exportConversation() async {
+    final msgs = _allMsgs;
+    if (msgs.isEmpty) {
+      _snack('لا رسائل لتصديرها');
+      return;
+    }
+    // انتظار فك النصوص المشفرة المعلقة (أقصى انتظار معقول)
+    for (var i = 0; i < 20 && _plain.length < 1; i++) {
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    final now = DateTime.now();
+    final text = ExportService.buildText(
+      title: _title,
+      msgs: msgs,
+      senderOf: (id) => _senderName(id),
+      textOf: (m) => _textOf(m),
+      myId: _me,
+      now: now,
+      appVersion: AppConfig.appVersion,
+    );
+    final name = ExportService.fileName(_title, now);
+    try {
+      if (kIsWeb) {
+        webDownload(Uint8List.fromList(utf8.encode(text)), name, 'text/plain; charset=utf-8');
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/$name');
+      await f.writeAsString(text, flush: true);
+      await SharePlus.instance.share(ShareParams(
+          files: [XFile(f.path, mimeType: 'text/plain')],
+          subject: 'تصدير محادثة وصل شات'));
+    } catch (_) {
+      _snack('تعذّر تصدير المحادثة');
+    }
+  }
+
+  // يكتب الآن + علامات القراءة
+  late final RealtimeChannel _room;
+  StreamSubscription<List<Map<String, dynamic>>>? _partsSub;
+  final Map<String, DateTime> _typing = {};
+  Timer? _typingSweep;
+  DateTime _lastTypingSent = DateTime(2000);
+  DateTime? _othersReadUpTo;
+  String? _lastMarkedId;
+  Timer? _readTicker;
+  bool _peerInRoom = false;
+  Map<String, dynamic>? _lastMine;
+  StreamSubscription<List<Map<String, dynamic>>>? _lastMineSub;
+  // 2.1.0: الشريط المدمج + إيصال التسليم الحقيقي + الرحلة الحية
+  String? _selectedMsg;
+  bool _barAlways = false;
+  final Map<String, String> _deliveredAt = {};
+  final Set<String> _ackedIds = {};
+  final Set<String> _echoSeen = {};
+  DateTime? _peerReadAt;
+  List<Map<String, dynamic>> _partRows = const [];
+  bool _returnFlash = false;
+  Timer? _returnTimer;
+  late final AnimationController _dotsCtrl = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1100))
+    ..repeat();
+  // 2.2.0: «حذف لدي» (إخفاء محلي) + قفل منع التنفيذ المزدوج للإجراءات
+  Set<String> _hiddenIds = {};
+  bool _barBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _itemPositions.itemPositions.addListener(_onPositions);
+    _chatStyle.addListener(_onStudio);
+    AppStudioService.style.addListener(_onStudio);
+    // استبعادات التذكير الذكي المحفوظة (9 ب) — تُحمَّل محلياً بلا شبكة
+    _secure
+        .read(key: 'wasl_promise_dismissed_${widget.conversationId}')
+        .then((v) {
+      if (v != null && v.isNotEmpty && mounted) {
+        setState(() => _dismissedPromises = v.split(',').toSet());
+      }
+    }).catchError((_) {});
+    // 2.1.0: أرشيف إيصالات التسليم المحلي + تفضيل الشريط المدمج
+    _loadJourney();
+    _secure.read(key: 'wasl_bar_always_${widget.conversationId}').then((v) {
+      if (v == '1' && mounted) setState(() => _barAlways = true);
+    }).catchError((_) {});
+    // 2.2.0: قائمة الإخفاء المحلي («حذف لدي») لهذه المحادثة
+    _secure.read(key: 'wasl_hidden_${widget.conversationId}').then((v) {
+      if (v != null && v.isNotEmpty && mounted) {
+        setState(() => _hiddenIds = v.split(',').toSet());
+      }
+    }).catchError((_) {});
+        _stream = supabase
+        .from('messages')
+        .stream(primaryKey: ['id'])
+        .eq('conversation_id', widget.conversationId)
+        .order('created_at', ascending: true);
+    _text.addListener(_onTextChanged);
+    if (widget.isGroup) _loadMembers();
+    _otherAvatar = widget.initialAvatar;
+    _loadMeta();
+    unawaited(_loadOtherAvatar());
+    _refreshBlockState();
+    unawaited(_refreshVerified());
+    unawaited(_loadMuteState());
+    unawaited(_loadAutoTranslatePref());
+    unawaited(_loadClearedAt());
+    // الصورة المشتركة من المتصفح (1.22.0): أول دردشة تفتح تستهلكها من
+    // المركز فتمر بالمحرر المحلي ثم مسار الإرسال القائم — بلا مسار موازاة
+    unawaited(_consumeSharedImage());
+    unawaited(_loadBell()); // جرس القنوات (0.21.0)
+    PushService.visibleConversation = widget.conversationId;
+    ScreenshotService.flagOf(widget.conversationId).then((v) {
+      if (!mounted || !v) return;
+      setState(() => _noScreenshots = true);
+      ScreenshotService.setSecure(true);
+    });
+
+    // بث «يكتب الآن» بين أعضاء المحادثة
+    _room = supabase.channel('room:${widget.conversationId}');
+    _room
+        .onBroadcast(
+          event: 'typing',
+          callback: (payload) {
+            final data = payload['payload'] is Map ? payload['payload'] as Map : payload;
+            final uid = data['user_id'];
+            if (uid is! String || uid == _me || !mounted) return;
+            setState(() => _typing[uid] = DateTime.now());
+          },
+        )
+        // حضور غرفة المحادثة (2.0.4): هل يشاهد الطرف الآخر هذه المحادثة الآن؟
+        .onPresenceSync((_) {
+          if (widget.isGroup || widget.otherId == null) return;
+          var inRoom = false;
+          for (final s in _room.presenceState()) {
+            for (final p in s.presences) {
+              final id = p.payload['user_id'];
+              if (id == widget.otherId) inRoom = true;
+            }
+          }
+          if (mounted && inRoom != _peerInRoom) {
+            setState(() => _peerInRoom = inRoom);
+          }
+        })
+        // إيصال التسليم (2.1.0): جهاز المستلم يؤكد لحظياً وصول الرسائل إليه —
+        // أساس علامة «أُسلّمت» الصادقة: قبول الخادم لا يكفي وحده
+        .onBroadcast(
+          event: 'msgack',
+          callback: (payload) {
+            final data =
+                payload['payload'] is Map ? payload['payload'] as Map : payload;
+            final ids = data['ids'];
+            final at = (data['at'] as String?) ??
+                DateTime.now().toUtc().toIso8601String();
+            if (ids is! List || ids.isEmpty) return;
+            var changed = false;
+            for (final id in ids) {
+              if (id is String && !_deliveredAt.containsKey(id)) {
+                _deliveredAt[id] = at;
+                changed = true;
+              }
+            }
+            if (changed) {
+              _saveJourney();
+              if (mounted) setState(() {});
+            }
+          },
+        )
+        .subscribe((status, _) async {
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        await _room.track({'user_id': _me});
+      }
+    });
+    _typingSweep = Timer.periodic(const Duration(seconds: 1), (_) {
+      final now = DateTime.now();
+      final before = _typing.length;
+      _typing.removeWhere((_, t) => now.difference(t).inSeconds >= 4);
+      if (_typing.length != before && mounted) setState(() {});
+    });
+
+    // متى قرأ الآخرون؟ (لعلامة ✓✓)
+    _partsSub = supabase
+        .from('conversation_participants')
+        .stream(primaryKey: ['conversation_id', 'user_id'])
+        .eq('conversation_id', widget.conversationId)
+        .listen((rows) {
+      DateTime? minRead;
+      DateTime? peerRead;
+      _partRows = rows;
+      for (final r in rows) {
+        if (r['user_id'] == _me) continue;
+        if (r['last_read_at'] != null) {
+          final t = DateTime.parse(r['last_read_at'] as String);
+          if (!widget.isGroup && r['user_id'] == widget.otherId) peerRead = t;
+          if (minRead == null || t.isBefore(minRead)) minRead = t;
+        }
+      }
+      _peerReadAt = peerRead;
+      if (mounted) setState(() => _othersReadUpTo = minRead);
+    });
+
+    // آخر رسالة أرسلتها هنا (2.0.4) — لسرد حالة التسليم الذكي تحت الاسم
+    if (!widget.isGroup) {
+      _lastMineSub = supabase
+          .from('messages')
+          .stream(primaryKey: ['id'])
+          .eq('conversation_id', widget.conversationId)
+          .eq('sender_id', _me)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .listen((rows) {
+        if (!mounted) return;
+        setState(() => _lastMine = rows.isEmpty ? null : rows.first);
+      }, onError: (_) {});
+    }
+
+    _reactSub = supabase
+        .from('message_reactions')
+        .stream(primaryKey: ['message_id', 'user_id'])
+        .eq('conversation_id', widget.conversationId)
+        .listen((rows) {
+      final map = <String, Map<String, String>>{};
+      for (final r in rows) {
+        (map[r['message_id'] as String] ??= {})[r['user_id'] as String] = r['emoji'] as String;
+      }
+      if (mounted) setState(() => _reactions = map);
+      _decryptReactions(map);
+    }, onError: (_) {});
+
+    PresenceService.online.addListener(_onPresence);
+    unawaited(_markRead());
+    // النبض الحي (2.1.0): شارة «عاد للاتصال الآن» عند عودة الطرف أثناء فتح المحادثة
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      var wasOnline = PresenceService.isOnline(widget.otherId);
+      PresenceService.online.addListener(() {
+        final now = PresenceService.isOnline(widget.otherId);
+        if (!widget.isGroup &&
+            PrivacyService.liveFx.value &&
+            now &&
+            !wasOnline &&
+            mounted) {
+          setState(() => _returnFlash = true);
+          _returnTimer?.cancel();
+          _returnTimer = Timer(const Duration(seconds: 4), () {
+            if (mounted) setState(() => _returnFlash = false);
+          });
+        }
+        wasOnline = now;
+      });
+    });
+    // نبضة قراءة كل 15 ثانية ما دامت الشاشة مفتوحة — تضمن سحب الشارة حتى لو
+    // فُوّت حدث لحظي أو ضاع إرسال صامت أثناء قفل الشاشة أو انقطاع شعيرية (2.0.3)
+    _readTicker = Timer.periodic(
+        const Duration(seconds: 15), (_) => unawaited(_markRead()));
+  }
+
+  void _onPresence() {
+    if (mounted) setState(() {});
+  }
+
+  void _onTextChanged() {
+    setState(() {});
+    // الخصوصية الحية (2.1.0): مشاركة حالة الكتابة قرار المستخدم
+    if (!PrivacyService.shareTyping.value) return;
+    final now = DateTime.now();
+    if (_text.text.trim().isNotEmpty &&
+        now.difference(_lastTypingSent).inMilliseconds > 2000) {
+      _lastTypingSent = now;
+      _room.sendBroadcastMessage(event: 'typing', payload: {'user_id': _me});
+    }
+  }
+
+  /// نعلّم المحادثة مقروءة عند وصول رسالة جديدة من الآخرين
+  void _maybeMarkRead(List<Map<String, dynamic>> newestFirst) {
+    if (newestFirst.isEmpty) return;
+    final last = newestFirst.first;
+    final id = last['id'] as String;
+    if (id == _lastMarkedId || last['sender_id'] == _me) return;
+    _lastMarkedId = id;
+    unawaited(_markRead());
+  }
+
+  /// تعليم المقروء مع إعادة المحاولة — كان الإرسال الناري الصامت يضيع عند أي
+  /// فشل لحظي فتبقى شارة غير المقروء عالقة رغم قراءة الرسائل (2.0.3)
+  Future<void> _markRead() async {
+    // الخصوصية الحية (2.1.0): بإيقاف مشاركة القراءة يتوقف تعليم مقروء نهائياً
+    if (!PrivacyService.shareReads.value) return;
+    for (var i = 0; i < 3; i++) {
+      try {
+        await supabase.rpc('mark_read', params: {'conv': widget.conversationId});
+        return;
+      } catch (_) {
+        if (i == 2) return;
+        await Future.delayed(const Duration(seconds: 2));
+      }
+    }
+  }
+
+  Future<void> _loadMeta() async {
+    try {
+      final conv = await supabase
+          .from('conversations')
+          .select('disappear_seconds, avatar_url')
+          .eq('id', widget.conversationId)
+          .maybeSingle();
+      final stars = await supabase
+          .from('message_stars')
+          .select('message_id')
+          .eq('conversation_id', widget.conversationId);
+      if (!mounted) return;
+      setState(() {
+        _disappear = conv?['disappear_seconds'] as int?;
+        _stars = {for (final r in stars) r['message_id'] as String};
+        _groupAvatarPath = conv?['avatar_url'] as String?;
+      });
+    } catch (_) {}
+  }
+
+  /// صورة الطرف الآخر — طلب مستقل كي لا يسقطها فشل أي استعلام آخر
+  bool _otherVerified = false;
+  bool _otherOfficial = false;
+
+  Future<void> _loadOtherAvatar() async {
+    if (widget.isGroup || widget.otherId == null) return;
+    try {
+      final p = await supabase
+          .from('profiles')
+          .select('avatar_url, verified, is_official')
+          .eq('id', widget.otherId!)
+          .maybeSingle();
+      if (!mounted || p == null) return;
+      final a = p['avatar_url'] as String?;
+      setState(() {
+        if (a != null && a.isNotEmpty) _otherAvatar = a;
+        _otherVerified = p['verified'] == true;
+        _otherOfficial = p['is_official'] == true;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleStar(Map<String, dynamic> m) async {
+    final id = m['id'] as String;
+    final starred = _stars.contains(id);
+    setState(() => starred ? _stars.remove(id) : _stars.add(id));
+    try {
+      if (starred) {
+        await supabase.from('message_stars').delete().eq('message_id', id).eq('user_id', _me);
+      } else {
+        await supabase.from('message_stars').insert({
+          'message_id': id,
+          'conversation_id': widget.conversationId,
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => starred ? _stars.add(id) : _stars.remove(id));
+      _snack('تعذّر الحفظ');
+    }
+  }
+
+  Future<void> _changeDisappearing() async {
+    final v = await pickDisappearing(context, widget.conversationId, _disappear);
+    if (v != null && mounted) setState(() => _disappear = v == 0 ? null : v);
+  }
+
+  void _openContact() {
+    if (widget.otherId == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContactScreen(
+          otherId: widget.otherId!,
+          conversationId: widget.conversationId,
+          title: _title,
+          disappearSeconds: _disappear,
+          onSafetyNumber: _showSafety ? _showSafetyNumber : null,
+          onShowStarred: () => setState(() => _starredOnly = true),
+          onOpenMedia: _openMediaGallery,
+          onVoiceCall: widget.isBot ? null : () => _startCall(CallKind.voice),
+          onVideoCall: widget.isBot ? null : () => _startCall(CallKind.video),
+        ),
+      ),
+    ).then((changed) {
+      if (changed == true) {
+        _refreshBlockState();
+      } else {
+        _loadMeta();
+      }
+    });
+  }
+
+  Future<void> _refreshBlockState() async {
+    final other = widget.otherId;
+    if (widget.isGroup || other == null) return;
+    await BlockService.ensureLoaded();
+    if (mounted) setState(() => _iBlockedPeer = BlockService.isBlocked(other));
+  }
+
+  Future<void> _unblockPeer() async {
+    final other = widget.otherId;
+    if (other == null) return;
+    try {
+      await BlockService.unblock(other);
+      if (mounted) setState(() => _iBlockedPeer = false);
+    } catch (_) {
+      _snack('تعذّر إلغاء الحظر');
+    }
+  }
+
+  Widget _blockedBanner() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, WaslSpace.md),
+        padding: const EdgeInsets.all(WaslSpace.lg),
+        decoration: BoxDecoration(
+          color: WaslColors.danger.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(WaslRadius.lg),
+          border: Border.all(color: WaslColors.danger.withValues(alpha: 0.4)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.block_rounded, color: WaslColors.danger, size: 18),
+            SizedBox(width: WaslSpace.sm),
+            Text('أنت تحظر هذا الاتصال',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ]),
+          const SizedBox(height: WaslSpace.xs),
+          Text('لن تصل رسائله الجديدة إليك، ولا يمكن الإرسال إليه.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: context.textTertiary, fontSize: WaslFont.small)),
+          TextButton(
+            onPressed: _unblockPeer,
+            child: const Text('إلغاء الحظر'),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// لافتة الكتم في غرف المجتمعات: تُحل محل شريط الإدخال كلياً
+  Widget _mutedBanner() {
+    final until = ModerationService.formatUntil(_mutedUntil!, DateTime.now());
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, WaslSpace.md),
+        padding: const EdgeInsets.all(WaslSpace.lg),
+        decoration: BoxDecoration(
+          color: WaslColors.warning.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(WaslRadius.lg),
+        ),
+        child: Row(children: [
+          const Icon(Icons.mic_off_outlined, size: 18, color: WaslColors.warning),
+          const SizedBox(width: WaslSpace.sm),
+          Expanded(
+            child: Text('أنت مكتوم في هذا المجتمع حتى $until',
+                style: const TextStyle(color: WaslColors.warning, fontSize: WaslFont.meta)),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  String? _statusLine() {
+    if (_typing.isNotEmpty) {
+      if (!widget.isGroup) return 'يكتب الآن...';
+      final names = _typing.keys.map((id) => _names[id] ?? '').where((n) => n.isNotEmpty);
+      return names.isEmpty ? 'أحدهم يكتب...' : '${names.join('، ')} يكتب...';
+    }
+    if (widget.isGroup) {
+      if (_names.isEmpty) return null;
+      return widget.isChannel ? '${_names.length} متابع' : '${_names.length} أعضاء';
+    }
+    // 2.0.4: سرد التسليم الذكي — لا يشرح أي تطبيق آخر حالة رسلك بالكلام
+    if (widget.isBot) return null;
+    if (_peerInRoom) return 'متصل الآن — يشاهد هذه المحادثة';
+    if (PresenceService.isOnline(widget.otherId)) return 'متصل الآن';
+    final lm = _lastMine;
+    if (lm == null) return null;
+    final created = DateTime.parse(lm['created_at'] as String);
+    final read = _othersReadUpTo != null && !created.isAfter(_othersReadUpTo!);
+    if (read) return 'قرأ رسالتك الأخيرة';
+    if (PresenceService.isOnline(widget.otherId)) {
+      return 'وصل رسلك جهازه — لم يفتح المحادثة بعد';
+    }
+    return 'جهازه غير متصل الآن — سيصل رسلك عند اتصاله';
+  }
+
+  /// أدلة التسليم الحقيقية (2.1.0): قبول الخادم لا يكفي — نعتمد إيصال جهاز
+  /// المستلم اللحظي (msgack) أو اتصاله الآن أو قراءته الفعلية. لا حالات مزيفة.
+  bool _delivered(Map<String, dynamic> m) {
+    if (_deliveredAt.containsKey(m['id'])) return true;
+    if (widget.isGroup) {
+      final others = _names.keys.where((id) => id != _me);
+      return others.any(PresenceService.isOnline);
+    }
+    return PresenceService.isOnline(widget.otherId);
+  }
+
+  /// علامات وفق مواصفة 2.1.0: قُرئت = ✓✓ بالتركواز — أُسلّمت = ✓ رمادية —
+  /// بلا دليل تسليم = بلا علامة (الرسالة في انتظار التسليم، لا حالات مضللة)
+  Widget _ticks(Map<String, dynamic> m) {
+    if (m['deleted_at'] != null) return const SizedBox.shrink();
+    final created = DateTime.parse(m['created_at'] as String);
+    final read = _othersReadUpTo != null && !created.isAfter(_othersReadUpTo!);
+    if (read) {
+      return Icon(Icons.done_all_rounded,
+          size: 16, color: _ink.readTick, semanticLabel: 'قُرئت');
+    }
+    if (_delivered(m)) {
+      return Icon(Icons.done_rounded,
+          size: 16, color: _ink.secondary, semanticLabel: 'سُلّمت');
+    }
+    return const SizedBox.shrink();
+  }
+
+  // ---------- 2.1.0: رحلة الرسالة + من قرأ + الشريط المدمج ----------
+
+  Future<void> _loadJourney() async {
+    try {
+      final raw =
+          await _secure.read(key: 'wasl_journey_${widget.conversationId}');
+      if (raw == null || raw.isEmpty || !mounted) return;
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      _deliveredAt
+        ..clear()
+        ..addEntries(map.entries.map((e) => MapEntry(e.key, e.value as String)));
+      setState(() {});
+    } catch (_) {}
+  }
+
+  Future<void> _saveJourney() async {
+    try {
+      // نحتفظ بآخر 300 إيصال — أرشيف محلي خفيف لا ينمو بلا حدود
+      final entries = _deliveredAt.entries.toList()
+        ..sort((a, b) => a.value.compareTo(b.value));
+      final keep = entries.length > 300
+          ? Map.fromEntries(entries.sublist(entries.length - 300))
+          : Map<String, String>.fromEntries(entries);
+      await _secure.write(
+          key: 'wasl_journey_${widget.conversationId}',
+          value: jsonEncode(keep));
+    } catch (_) {}
+  }
+
+  void _ackIncoming(List<Map<String, dynamic>> rows) {
+    // جهاز المستلم يؤكد وصول الرسائل الجديدة — مرة واحدة لكل رسالة
+    final now = DateTime.now().toUtc().toIso8601String();
+    final ids = <String>[];
+    for (final r in rows) {
+      final id = r['id'] as String?;
+      if (id == null || r['sender_id'] == _me) continue;
+      if (_ackedIds.add(id)) ids.add(id);
+    }
+    if (ids.isEmpty) return;
+    Future.microtask(() {
+      try {
+        _room.sendBroadcastMessage(
+            event: 'msgack',
+            payload: {'ids': ids.take(60).toList(), 'at': now});
+      } catch (_) {}
+    });
+  }
+
+  /// نافذة رحلة الرسالة — الأحداث التي وقعت فعلاً فقط بأوقاتها الدقيقة
+  void _showJourney(Map<String, dynamic> m) {
+    final created = DateTime.parse(m['created_at'] as String).toLocal();
+    String hhmm(DateTime t) =>
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    final deliveredAt = _deliveredAt[m['id']];
+    final readAt = (_peerReadAt != null &&
+            !created.toUtc().isAfter(_peerReadAt!.toUtc()))
+        ? _peerReadAt!.toLocal()
+        : null;
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(WaslSpace.xl, WaslSpace.md, WaslSpace.xl, WaslSpace.sm),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('رحلة الرسالة',
+                style: TextStyle(fontSize: WaslFont.titleLarge, fontWeight: FontWeight.w800)),
+            const SizedBox(height: WaslSpace.lg),
+            _journeyRow(true, hhmm(created), 'تم إنشاء الرسالة وإرسالها'),
+            _journeyRow(true, hhmm(created), 'قبول الخادم للرسالة'),
+            if (deliveredAt != null)
+              _journeyRow(true, hhmm(DateTime.parse(deliveredAt).toLocal()),
+                  'وصلت جهاز المستلم'),
+            if (readAt != null) _journeyRow(true, hhmm(readAt), 'قرأها المستلم'),
+            if (deliveredAt == null)
+              _journeyRow(false, null, 'بانتظار تأكيد جهاز المستلم…'),
+            if (deliveredAt != null && readAt == null)
+              _journeyRow(false, null, 'بانتظار فتح المحادثة وقراءتها…'),
+            const SizedBox(height: WaslSpace.sm),
+            Text('تعرض الأحداث الوقعة فعلاً فقط — الأوقات بتوقيت جهازك',
+                style: TextStyle(fontSize: WaslFont.small, color: ctx.textFaint)),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _journeyRow(bool done, String? time, String label) {
+    final c = done ? WaslColors.teal : context.textFaint;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: WaslSpace.xs),
+      child: Row(children: [
+        Icon(done ? Icons.check_circle_rounded : Icons.hourglass_bottom_rounded,
+            size: 18, color: c),
+        const SizedBox(width: WaslSpace.md),
+        if (time != null)
+          Text('$time — ',
+              style: TextStyle(
+                  fontWeight: FontWeight.w800, color: c, fontSize: WaslFont.body)),
+        Expanded(
+            child: Text(label,
+                style: TextStyle(
+                    color: done ? context.textSecondary : context.textFaint,
+                    fontSize: WaslFont.body))),
+      ]),
+    );
+  }
+
+  /// من قرأها في المجموعة؟ من آخر قراءة حقيقي لكل عضو — بلا تقدير
+  void _showGroupReads(Map<String, dynamic> m) {
+    final created = DateTime.parse(m['created_at'] as String);
+    final readers = <MapEntry<String, DateTime>>[];
+    final unread = <String>[];
+    for (final r in _partRows) {
+      final id = r['user_id'] as String?;
+      if (id == null || id == _me) continue;
+      final raw = r['last_read_at'];
+      if (raw != null && !DateTime.parse(raw as String).isBefore(created)) {
+        readers.add(MapEntry(id, DateTime.parse(raw)));
+      } else {
+        unread.add(id);
+      }
+    }
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(WaslSpace.xl, WaslSpace.md, WaslSpace.xl, WaslSpace.sm),
+          child: Text('قرأها ${readers.length} من ${readers.length + unread.length}',
+              style: const TextStyle(fontSize: WaslFont.title, fontWeight: FontWeight.w800)),
+        ),
+        ...readers.map((e) => ListTile(
+              dense: true,
+              leading: const Icon(Icons.done_all_rounded,
+                  size: 18, color: WaslColors.readTick),
+              title: Text(_senderName(e.key)),
+              trailing: Text(shortTime(e.value.toUtc().toIso8601String()),
+                  style: TextStyle(color: ctx.textFaint, fontSize: WaslFont.small)),
+            )),
+        ...unread.map((id) => ListTile(
+              dense: true,
+              leading: Icon(Icons.schedule_rounded, size: 18, color: ctx.textFaint),
+              title: Text(_senderName(id)),
+              trailing: Text('لم يقرأ بعد',
+                  style: TextStyle(color: ctx.textFaint, fontSize: WaslFont.small)),
+            )),
+      ],
+    );
+  }
+
+  /// الشريط التكيفي (2.2.0): إجراءات حسب نوع الرسالة وصلاحياتها — يظهر عند
+  /// الحاجة فقط، يتكيف مع عرض الشاشة، لمس ≥40، تلميحات لقارئ الشاشة، اهتزاز
+  /// لمسي خفيف، ومنع التنفيذ المزدوج. بلا أي اتصال بالخادم للعرض.
+  Widget _inlineBar(Map<String, dynamic> m) {
+    final mine = m['sender_id'] == _me;
+    final kind = AdaptiveActions.kindOf(m);
+    final text = kind == 'text' ? _textOf(m) : null;
+    final suggestions = AdaptiveActions.suggest(text);
+    final allowForward = _e2e &&
+        !widget.isChannel &&
+        m['view_once'] != true &&
+        m['protected'] != true;
+    // العدد المعروض يتكيف مع عرض الشاشة — الباقي ينتقل إلى «المزيد»
+    final screenW = MediaQuery.of(context).size.width;
+    final maxVisible = (screenW < 360 ? 4 : (screenW < 480 ? 5 : 7)).clamp(3, 7);
+    final eligible = AdaptiveActions.actionsFor(
+      kind: kind,
+      mine: mine,
+      canPost: widget.canPost,
+    ).where((a) {
+      if (a.id == 'forward' && !allowForward) return false;
+      if (a.id == 'edit' && !_canEdit(m)) return false;
+      if (a.id == 'copy' && text == null && kind != 'location') return false;
+      if (a.id == 'translate' && text == null) return false;
+      return true;
+    }).toList();
+    final head = eligible.take(maxVisible - 1).toList();
+    final moreCount = eligible.length - head.length;
+    void run(VoidCallback f) {
+      if (_barBusy) return; // منع التنفيذ المزدوج بالنقر المتكرر
+      HapticFeedback.selectionClick();
+      f();
+    }
+
+    Widget btn(AdaptiveAction a) => Tooltip(
+          message: a.label,
+          waitDuration: const Duration(milliseconds: 350),
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(WaslRadius.xl),
+              onTap: () => run(() => _runBarAction(a.id, m)),
+              child: Icon(a.icon, size: 19, color: Colors.white70),
+            ),
+          ),
+        );
+    return MotionScaleIn(
+      child: Padding(
+        padding: const EdgeInsets.only(top: WaslSpace.xxs),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: WaslSpace.xs, vertical: WaslSpace.xxs),
+          decoration: BoxDecoration(
+            color: context.glass,
+            borderRadius: BorderRadius.circular(WaslRadius.xl),
+            border: Border.all(color: context.hairline),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (suggestions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(WaslSpace.sm, WaslSpace.xs, WaslSpace.sm, 0),
+                  child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    for (final s in suggestions)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: WaslSpace.xxs),
+                        child: ActionChip(
+                          avatar: Icon(s.icon, size: 13, color: WaslColors.teal),
+                          label: Text(s.label,
+                              style: const TextStyle(fontSize: WaslFont.small)),
+                          backgroundColor:
+                              WaslColors.teal.withValues(alpha: 0.12),
+                          side: BorderSide(
+                              color: WaslColors.teal.withValues(alpha: 0.35)),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => run(() => _runSuggestion(s, m)),
+                        ),
+                      ),
+                  ])),
+                ),
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final a in head) btn(a),
+                btn(AdaptiveAction('more', Icons.more_horiz_rounded,
+                    moreCount > 0 ? 'المزيد ($moreCount)' : 'المزيد')),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _runBarAction(String id, Map<String, dynamic> m) async {
+    setState(() => _selectedMsg = null);
+    switch (id) {
+      case 'react':
+        _emojiSheet(m);
+        return;
+      case 'reply':
+        setState(() {
+          _replyTo = m;
+          _editing = null;
+        });
+        return;
+      case 'copy':
+        // الموقع: النسخ يجلب الإحداثيات الصماء لا النص المشفر
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          final loc = _locParts(_textOf(m) ?? '');
+          if (loc != null) {
+            await Clipboard.setData(
+                ClipboardData(text: '${loc.$1},${loc.$2}'));
+            _snack('نُسخت الإحداثيات');
+          }
+          return;
+        }
+        final t = _textOf(m);
+        if (t == null) return;
+        await Clipboard.setData(ClipboardData(text: t));
+        _snack('تم النسخ');
+        return;
+      case 'translate':
+        final t = _textOf(m);
+        if (t == null) return;
+        final arabic = RegExp(r'[\u0600-\u06FF]').hasMatch(t);
+        _showAiResult('الترجمة', AiService.translate(t, arabic ? 'en' : 'ar'));
+        return;
+      case 'edit':
+        _startEdit(m);
+        return;
+      case 'forward':
+        _forward(m);
+        return;
+      case 'share':
+        // الموقع: مشاركة رابط الخريطة كنص عبر ورقة النظام
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          final loc = _locParts(_textOf(m) ?? '');
+          if (loc != null) {
+            await SharePlus.instance.share(ShareParams(
+                text:
+                    '${loc.$3.isEmpty ? 'موقع' : loc.$3} — ${_locUrl(loc.$1, loc.$2)}',
+                subject: 'موقع من وصل شات'));
+          }
+          return;
+        }
+        await _barShare(m);
+        return;
+      case 'open':
+        // الموقع: فتح الخريطة الخارجية بدل فتح الوسائط
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          final loc = _locParts(_textOf(m) ?? '');
+          if (loc != null) {
+            await launchUrl(Uri.parse(_locUrl(loc.$1, loc.$2)),
+                mode: LaunchMode.externalApplication);
+          }
+          return;
+        }
+        await _openMedia(m);
+        return;
+      case 'speed':
+        if (mounted) setState(() => VoiceRateService.cycle());
+        _snack('سرعة التشغيل: ${VoiceRateService.rate}x — تُطبَّق عند التشغيل القادم');
+        return;
+      case 'link':
+        final p = m['media_url'] as String?;
+        if (p == null) return;
+        final url = await MediaService.signedUrl(p);
+        await Clipboard.setData(ClipboardData(text: url));
+        _snack('نُسخ رابط مؤقت — صالح لفترة محدودة');
+        return;
+      case 'save':
+        // حفظ الموقع إلى «رسائلي المحفوظة» عبر مسار التوجيه المشفر نفسه
+        // (الهدف is_group=true فيستخدم مفتاح المجموعة كما في _forward)
+        if (AdaptiveActions.kindOf(m) == 'location') {
+          try {
+            final savedId = await SavedService.id();
+            final ok = await ForwardService.send(
+                target: {
+                  'conversation_id': savedId,
+                  'is_group': true,
+                  'title': SavedService.title,
+                },
+                type: 'location',
+                text: _textOf(m));
+            _snack(ok
+                ? 'حُفظ الموقع في رسائلي المحفوظة'
+                : 'تعذّر الحفظ (التشفير غير جاهز)');
+          } catch (_) {
+            _snack('تعذّر الحفظ');
+          }
+          return;
+        }
+        return;
+      case 'more':
+        _messageActions(m);
+        return;
+    }
+  }
+
+  /// مشاركة/حفظ وسيط حقيقي: تنزيل وفك تشفير ثم ورقة مشاركة النظام
+  /// (وتتيح الحفظ في المعرض أو الملفات من النظام نفسه)
+  Future<void> _barShare(Map<String, dynamic> m) async {
+    if (_barBusy) return;
+    _barBusy = true;
+    try {
+      final bytes = await _mediaBytes(m);
+      if (bytes == null) {
+        _snack('تعذّر تنزيل الوسيط');
+        return;
+      }
+      final meta = _metaOf(m);
+      var name = (meta?['name'] as String?) ??
+          switch (m['type']) {
+            'image' => 'image.jpg',
+            'video' => 'video.mp4',
+            'voice' => 'voice.m4a',
+            _ => 'file',
+          };
+      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final dir = await getTemporaryDirectory();
+      final f = File(
+          '${dir.path}/wasl_${DateTime.now().millisecondsSinceEpoch}_$name');
+      await f.writeAsBytes(bytes, flush: true);
+      await SharePlus.instance.share(ShareParams(
+          files: [XFile(f.path)], subject: 'مشاركة من وصل شات'));
+    } catch (_) {
+      _snack('تعذّر مشاركة الوسيط');
+    } finally {
+      _barBusy = false;
+    }
+  }
+
+  /// طبقة الذكاء السياقي (2.2.x): اقتراحات محلية، لا تنفيذ تلقائي —
+  /// كل اقتراح ينتظر موافقة المستخدم ثم ينفذ إجراءاً حقيقياً
+  Future<void> _runSuggestion(ContextSuggestion s, Map<String, dynamic> m) async {
+    setState(() => _selectedMsg = null);
+    switch (s.kind) {
+      case 'call':
+        await launchUrl(Uri.parse('tel:${s.value}'));
+        return;
+      case 'email':
+        await launchUrl(Uri.parse('mailto:${s.value}'));
+        return;
+      case 'link':
+        final u = Uri.tryParse(s.value);
+        if (u != null) {
+          await launchUrl(u, mode: LaunchMode.externalApplication);
+        }
+        return;
+      case 'map':
+        await launchUrl(
+            Uri.parse('https://maps.google.com/?q=${Uri.encodeComponent(s.value)}'),
+            mode: LaunchMode.externalApplication);
+        return;
+      case 'attach':
+        _showAttachSheet();
+        return;
+      case 'reminder':
+        await _scheduleWhenReminder(s.value);
+        return;
+      case 'reply':
+        if (mounted) setState(() {
+          _replyTo = m;
+          _editing = null;
+        });
+        return;
+    }
+  }
+
+  /// تذكير سياقي: نفهم الوقت من النص محلياً ونعرضه على منتقي الوقت —
+  /// الجدولة إشعار محلي حقيقي عبر PushService.scheduleLocalReminder،
+  /// وإن لم يُفهم الوقت بدأ المنتقي من 9:00 والقرار للمستخدم دائماً
+  Future<void> _scheduleWhenReminder(String when) async {
+    final parsed = AdaptiveActions.parseWhen(when);
+    TimeOfDay initial = const TimeOfDay(hour: 9, minute: 0);
+    bool tomorrow = false;
+    if (parsed != null) {
+      initial = TimeOfDay(hour: parsed.hour, minute: parsed.minute);
+      tomorrow = parsed.tomorrow;
+    }
+    final picked = await showTimePicker(context: context, initialTime: initial);
+    if (picked == null || !mounted) return;
+    final now = DateTime.now();
+    var fire =
+        DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+    if (tomorrow) fire = fire.add(const Duration(days: 1));
+    if (!fire.isAfter(now)) fire = fire.add(const Duration(days: 1));
+    final snippet = when.length > 60 ? '${when.substring(0, 60)}…' : when;
+    final err = await PushService.scheduleLocalReminder(
+      title: 'تذكير من وصل — ${widget.title}',
+      body: 'الموعد: $snippet',
+      fireAt: fire,
+    );
+    if (!mounted) return;
+    _snack(err ??
+        'فُعّل التذكير: ${fire.day}/${fire.month} — ${fire.hour}:${fire.minute.toString().padLeft(2, '0')}');
+  }
+
+  /// تفاصيل الرسالة (2.2.0): النوع والوقت والمرسل والحالة — بيانات حقيقية فقط
+  void _showDetails(Map<String, dynamic> m) {
+    final created = DateTime.parse(m['created_at'] as String).toLocal();
+    final kind = AdaptiveActions.kindOf(m);
+    final kindLabel = switch (kind) {
+      'image' => 'صورة',
+      'video' => 'فيديو',
+      'voice' => 'رسالة صوتية',
+      'file' => 'ملف',
+      _ => 'نص',
+    };
+    final read = _othersReadUpTo != null &&
+        !created.toUtc().isAfter(_othersReadUpTo!);
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(WaslSpace.xl, WaslSpace.md, WaslSpace.xl, WaslSpace.sm),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('تفاصيل الرسالة',
+                style: TextStyle(fontSize: WaslFont.titleLarge, fontWeight: FontWeight.w800)),
+            const SizedBox(height: WaslSpace.md),
+            _detailRow('النوع', kindLabel),
+            _detailRow('المرسل', _senderName(m['sender_id'] as String?)),
+            _detailRow('الوقت',
+                '${created.hour.toString().padLeft(2, '0')}:${created.minute.toString().padLeft(2, '0')} — ${created.year}/${created.month}/${created.day}'),
+            _detailRow('الحالة',
+                read ? 'قُرئت' : (_delivered(m) ? 'أُسلّمت' : 'بانتظار التسليم')),
+            _detailRow('التفاعلات', '${(_reactions[m['id']] ?? {}).length} تفاعل'),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _detailRow(String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: WaslSpace.xs),
+        child: Row(children: [
+          SizedBox(
+              width: 72,
+              child: Text(k,
+                  style:
+                      TextStyle(color: context.textFaint, fontSize: WaslFont.meta))),
+          Expanded(
+              child: Text(v,
+                  style: const TextStyle(
+                      fontSize: WaslFont.body, fontWeight: FontWeight.w600))),
+        ]),
+      );
+
+  /// «حذف لدي» (2.2.0): إخفاء محلي دائم على هذا الجهاز — لا يُحذف عن
+  /// الآخرين ولا من الخادم، بلا أي تغيير في قاعدة البيانات
+  Future<void> _hideForMe(Map<String, dynamic> m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('حذف لدي؟'),
+        content: const Text(
+            'تختفي الرسالة من محادثتك على هذا الجهاز فقط، وتبقى موجودة عند باقي الأعضاء وعلى الخادم. لا يمكن التراجع من هذه الشاشة.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: WaslColors.danger),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('إخفاء')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (mounted) setState(() {
+      _hiddenIds.add(m['id'] as String);
+      if (_selectedMsg == m['id']) _selectedMsg = null;
+    });
+    await _secure.write(
+        key: 'wasl_hidden_${widget.conversationId}',
+        value: _hiddenIds.join(','));
+    _snack('أُخفيت الرسالة لديك فقط');
+  }
+
+  /// تفكيك محتوى الموقع (2.3.0): «lat,lng|وصف» — يعاد null عند التلف أو
+  /// الإحداثيات خارج النطاق؛ نحتاجه للفقاعة والشريط والنسخ والمشاركة
+  (double, double, String)? _locParts(String raw) {
+    final parts = raw.split('|');
+    final c = parts.first.split(',');
+    if (c.length < 2) return null;
+    final lat = double.tryParse(c[0].trim());
+    final lng = double.tryParse(c[1].trim());
+    if (lat == null || lng == null) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return (lat, lng, parts.length > 1 ? parts.sublist(1).join('|') : '');
+  }
+
+  String _locUrl(double lat, double lng) =>
+      'https://maps.google.com/?q=$lat,$lng';
+
+  /// فقاعة الموقع (2.3.0): بلاطة خرائط OSM حقيقية محسوبة من الإحداثيات
+  /// + دبوس فوقها + الوصف والإحداثيات — النقر يفتح الخريطة الخارجية،
+  /// وعند فشل تحميل البلاطة تظهر بطاقة إحداثيات أنيقة بدلها
+  Widget _locationBubble(Map<String, dynamic> m) {
+    final mine = m['sender_id'] == _me;
+    final loc = _locParts(_textOf(m) ?? '');
+    if (loc == null) {
+      return Text('موقع تالف',
+          style: TextStyle(
+              color: mine ? _ink.tertiary : context.textTertiary,
+              fontStyle: FontStyle.italic));
+    }
+    final (lat, lng, label) = loc;
+    const z = 14;
+    final n = 1 << z;
+    final xt = (((lng + 180) / 360) * n).floor().clamp(0, n - 1);
+    final rad = lat * pi / 180;
+    final yt =
+        ((1 - (log(tan(rad) + 1 / cos(rad)) / pi)) / 2 * n).floor().clamp(0, n - 1);
+    final tile = 'https://tile.openstreetmap.org/$z/$xt/$yt.png';
+    return InkWell(
+      borderRadius: BorderRadius.circular(WaslRadius.md),
+      onTap: () => launchUrl(Uri.parse(_locUrl(lat, lng)),
+          mode: LaunchMode.externalApplication),
+      child: Container(
+        width: 240,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(WaslRadius.md),
+          color: mine ? _ink.quoteFill : context.glass,
+          border: Border.all(color: context.hairline),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(alignment: Alignment.center, children: [
+              Image.network(tile,
+                  width: 240,
+                  height: 140,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Container(
+                        width: 240,
+                        height: 140,
+                        color: WaslColors.indigo.withValues(alpha: 0.25),
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.map_rounded,
+                            size: 42, color: WaslColors.teal),
+                      )),
+              const Icon(Icons.location_on_rounded,
+                  size: 34,
+                  color: WaslColors.danger,
+                  shadows: [Shadow(blurRadius: 6, color: Colors.black45)]),
+            ]),
+            Padding(
+              padding: const EdgeInsets.all(WaslSpace.sm),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label.isEmpty ? 'موقع' : label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: WaslFont.meta,
+                            fontWeight: FontWeight.w800,
+                            color: mine ? _ink.primary : context.textTertiary)),
+                    Text('${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                        style: TextStyle(
+                            fontSize: WaslFont.caption,
+                            color: mine ? _ink.secondary : context.textFaint)),
+                  ]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// مشاركة الموقع الحالي (2.3.0): تحديد عبر GPS ثم تأكيد صريح من
+  /// المستخدم، وتشفير الإحداثيات بنفس مسار النص تماماً (جلسة متدرجة
+  /// للخاص ومفتاح المحادثة للمجموعات) ثم إدراج type=location
+  /// «موقعي» (2.3.1): يحدد GPS ثم يفتح منتقي الخريطة والدرّب مثبت مسبقاً
+  /// على موقعك — فيستطيع المستخدم تصحيح النقطة قبل الإرسال
+  Future<void> _sendMyLocation() async {
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
+    if (!widget.canPost || widget.isChannel) return;
+    _snack('جارٍ تحديد موقعك…');
+    Position pos;
+    try {
+      pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 12)));
+    } catch (_) {
+      _snack('تعذّر تحديد الموقع — تحقق من صلاحية الموقع وتشغيل GPS');
+      return;
+    }
+    if (!mounted) return;
+    final pick = await showLocationPicker(context,
+        initialLat: double.parse(pos.latitude.toStringAsFixed(6)),
+        initialLng: double.parse(pos.longitude.toStringAsFixed(6)));
+    if (pick == null || !mounted) return;
+    await _sendLocationAt(pick.lat, pick.lng, pick.label);
+  }
+
+  /// «على الخريطة» (2.3.1): المنتقي مباشرة بلا GPS — مشاركة أي نقطة
+  /// (مكان عمل، مقر اجتماع) لا موقعك الحالي بالضرورة
+  Future<void> _pickLocation() async {
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
+    if (!widget.canPost || widget.isChannel) return;
+    final pick = await showLocationPicker(context);
+    if (pick == null || !mounted) return;
+    await _sendLocationAt(pick.lat, pick.lng, pick.label);
+  }
+
+  /// إرسال نقطة موقع: تشفير بنفس مسار النص (جلسة متدرجة للخاص ومفتاح
+  /// المحادثة للمجموعات) ثم إدراج type=location — منتقي الخريطة نفسه
+  /// هو التأكيد: دبوس مرئي على النقطة + وصف قابل للتحرير قبل الإرسال
+  Future<void> _sendLocationAt(double lat, double lng, String label) async {
+    final replyTo = _replyTo;
+    final content = '$lat,$lng|$label';
+    var payload = content;
+    if (_e2e) {
+      final isDm = !widget.isGroup && widget.otherId != null;
+      if (isDm) {
+        try {
+          final p = await E2eService.encryptDmText(
+              widget.conversationId, widget.otherId!, content);
+          if (p == null) {
+            _snack(_keyMissingMsg());
+            return;
+          }
+          payload = p;
+        } catch (_) {
+          _snack('تعذّر تشفير الموقع');
+          return;
+        }
+      } else {
+        final key = await _convKey();
+        if (key == null) {
+          _snack(_keyMissingMsg());
+          return;
+        }
+        try {
+          payload =
+              await E2eService.encryptText(key, widget.conversationId, content);
+        } catch (_) {
+          _snack('تعذّر تشفير الموقع');
+          return;
+        }
+      }
+    }
+    if (mounted) setState(() => _replyTo = null);
+    AppStudioService.thump();
+    try {
+      await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': 'location',
+        'content': payload,
+        if (replyTo != null) 'reply_to': replyTo['id'],
+      });
+    } catch (e) {
+      final hint = ModerationService.sendErrorHint(e);
+      if (hint != null || BlockService.isBlockedError(e)) {
+        _snack(hint ?? 'لا يمكن الإرسال — الحظر مفعّل بينكما');
+      } else {
+        _snack('تعذّر إرسال الموقع');
+      }
+    }
+  }
+
+  /// مرشحات البحث (2.4.0): مطابقة النوع المختار
+  bool _kindMatch(Map<String, dynamic> m) {
+    final t = m['type'] as String? ?? 'text';
+    switch (_searchKind) {
+      case 'all':
+      case 'text':
+        return t == 'text';
+      case 'link':
+        return t == 'text' && _linkRe.hasMatch(_textOf(m) ?? '');
+      case 'phone':
+        return t == 'text' && _phoneRe.hasMatch(_textOf(m) ?? '');
+      default:
+        return t == _searchKind;
+    }
+  }
+
+  /// النص القابل للبحث حسب النوع: نص الرسالة، اسم الملف/الفيديو من
+  /// الميتا المفكوكة، ووصف الموقع — فتدعم المرشحات والاستعلام معاً
+  String? _searchTextOf(Map<String, dynamic> m) {
+    final t = m['type'] as String? ?? 'text';
+    if (t == 'file' || t == 'video') {
+      final n = _metaOf(m)?['name'] as String?;
+      return (n == null || n.isEmpty) ? null : n;
+    }
+    // ج4: ميتا الصورة (bh/w/h/mk) ليست نصاً قابلاً للبحث
+    if (t == 'image' && (_textOf(m)?.startsWith('{') ?? false)) return null;
+    if (t == 'location') {
+      final loc = _locParts(_textOf(m) ?? '');
+      if (loc == null) return null;
+      return loc.$3.isEmpty ? 'موقع' : loc.$3;
+    }
+    return _textOf(m);
+  }
+
+  /// دمج مخزون البحث العميق مع رسائل الستريم (الأحدث تغلب) بترتيب زمني
+  List<Map<String, dynamic>> _searchBase(List<Map<String, dynamic>> all) {
+    if (_searchCorpus.isEmpty) return all;
+    final byId = <String, Map<String, dynamic>>{};
+    for (final m in _searchCorpus) {
+      byId[m['id'] as String] = m;
+    }
+    for (final m in all) {
+      byId[m['id'] as String] = m;
+    }
+    final list = byId.values.toList();
+    list.sort((a, b) => (a['created_at'] as String? ?? '')
+        .compareTo(b['created_at'] as String? ?? ''));
+    return list;
+  }
+
+  /// جلب مخزون البحث مرة واحدة عند الفتح — بحث في التاريخ العميق
+  Future<void> _loadSearchCorpus() async {
+    if (mounted) setState(() => _corpusLoading = true);
+    try {
+      final rows = await supabase
+          .from('messages')
+          .select()
+          .eq('conversation_id', widget.conversationId)
+          .order('created_at', ascending: false)
+          .limit(1000);
+      if (!mounted) return;
+      setState(() => _searchCorpus = List<Map<String, dynamic>>.from(rows));
+    } catch (_) {
+      // الستريم يبقى المخزون الاحتياطي — لا عطل في البحث عند فشل الجلب
+    } finally {
+      if (mounted) setState(() => _corpusLoading = false);
+    }
+  }
+
+  void _toggleSelect(Map<String, dynamic> m) {
+    if (m['deleted_at'] != null) return;
+    setState(() {
+      _selectedMsg = _selectedMsg == m['id'] ? null : m['id'] as String;
+    });
+  }
+
+  /// فقاعة «يكتب الآن» بالنقاط الزجاجية المتحركة فوق المحرر
+  Widget _typingBubble() {
+    if (_typing.isEmpty) return const SizedBox.shrink();
+    final label = widget.isGroup ? (_statusLine() ?? 'يكتب الآن...') : 'يكتب الآن...';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: WaslSpace.sm),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: WaslSpace.md, vertical: WaslSpace.sm),
+          decoration: BoxDecoration(
+            color: context.glass,
+            borderRadius: BorderRadius.circular(WaslRadius.lg),
+            border: Border.all(color: WaslColors.teal.withValues(alpha: 0.35)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            for (var i = 0; i < 3; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: WaslSpace.xxs),
+                child: ScaleTransition(
+                  scale: Tween(begin: 0.5, end: 1.0).animate(
+                    CurvedAnimation(
+                      parent: _dotsCtrl,
+                      curve: Interval(
+                          i * 0.2, i * 0.2 + 0.5, curve: Curves.easeOut),
+                    ),
+                  ),
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: WaslColors.teal.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(width: WaslSpace.sm),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: WaslFont.meta, fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _emojiSheet(Map<String, dynamic> m) {
+    final myReaction = _emojiOf(_reactions[m['id']]?[_me] ?? '');
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        Container(
+          margin: const EdgeInsets.fromLTRB(WaslSpace.lg, WaslSpace.sm, WaslSpace.lg, WaslSpace.md),
+          padding: const EdgeInsets.symmetric(horizontal: WaslSpace.sm, vertical: WaslSpace.xs),
+          decoration: BoxDecoration(
+            color: context.glass,
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              for (final e in _quickEmojis)
+                InkWell(
+                  borderRadius: BorderRadius.circular(WaslRadius.xl),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _selectedMsg = null);
+                    _react(m, e);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.all(WaslSpace.sm),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: myReaction == e
+                          ? WaslColors.teal.withValues(alpha: 0.30)
+                          : null,
+                    ),
+                    child: Text(e, style: const TextStyle(fontSize: WaslFont.displayLarge)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    ScreenshotService.routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
+  void didPopNext() {
+    // عدنا من شاشة أعلى: أعد تطبيق منع اللقطات الخاص بهذه المحادثة
+    ScreenshotService.setSecure(_noScreenshots);
+  }
+
+  Future<void> _toggleNoScreenshots() async {
+    final v = !_noScreenshots;
+    await ScreenshotService.setSecure(v);
+    await ScreenshotService.setFlag(widget.conversationId, v);
+    if (mounted) {
+      setState(() => _noScreenshots = v);
+      _snack(v ? 'مُنع التقاط الشاشة في هذه المحادثة' : 'أُسمح بلقطات الشاشة مجدداً');
+    }
+  }
+
+  @override
+  void dispose() {
+    _itemPositions.itemPositions.removeListener(_onPositions);
+    _derivedFromStream.dispose();
+    _awayFromBottom.dispose();
+    _newWhileAway.dispose();
+    ScreenshotService.routeObserver.unsubscribe(this);
+    ScreenshotService.setSecure(false);
+    if (PushService.visibleConversation == widget.conversationId) {
+      PushService.visibleConversation = null;
+    }
+    // القراءة الصوتية تتوقف عند مغادرة المحادثة (0.21.0)
+    VoiceReadService.stop();
+    _ticker?.cancel();
+    _typingSweep?.cancel();
+    _readTicker?.cancel();
+    _partsSub?.cancel();
+    _lastMineSub?.cancel();
+    _reactSub?.cancel();
+    _dotsCtrl.dispose();
+    _returnTimer?.cancel();
+    PresenceService.online.removeListener(_onPresence);
+    supabase.removeChannel(_room);
+    unawaited(_markRead());
+    _recorder.dispose();
+    _text.dispose();
+    _searchCtrl.dispose();
+    _chatStyle.removeListener(_onStudio);
+    AppStudioService.style.removeListener(_onStudio);
+    super.dispose();
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _loadMembers() async {
+    try {
+      final rows = await supabase
+          .from('conversation_participants')
+          .select('user_id, profiles(username, display_name)')
+          .eq('conversation_id', widget.conversationId);
+      final map = <String, String>{};
+      for (final r in rows) {
+        final p = r['profiles'] as Map<String, dynamic>?;
+        map[r['user_id'] as String] =
+            (p?['display_name'] ?? p?['username'] ?? '') as String;
+      }
+      if (mounted) setState(() => _names = map);
+    } catch (_) {}
+  }
+
+  String _keyMissingMsg() {
+    if (!E2eService.isReady) {
+      return 'مفتاح التشفير غير مفعّل على هذا الجهاز: الإعدادات ← مفتاح التشفير';
+    }
+    if (widget.isGroup) {
+      return 'بانتظار عضو في المجموعة يفتحها ليشارك مفتاح التشفير معك';
+    }
+    return 'التشفير غير جاهز: الطرف الآخر يحتاج تحديث التطبيق وفتحه';
+  }
+
+  // ---------- رمز الأمان ----------
+  bool get _showSafety =>
+      _e2e && !widget.isGroup && widget.otherId != null && !widget.isBot;
+
+  Future<void> _refreshVerified() async {
+    if (!_showSafety) return;
+    final v = await E2eService.isVerified(widget.otherId!);
+    if (mounted) setState(() => _verified = v);
+  }
+
+  Future<void> _openVerifyQr() async {
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => VerifyQrScreen(otherUserId: widget.otherId!)));
+    if (mounted) {
+      setState(() {});
+      unawaited(_refreshVerified());
+    }
+  }
+
+  /// بدء مكالمة من المحادثة (0.17.0): طابور واحد — مكالمة واحدة في كل مرة
+  Future<void> _startCall(CallKind kind) async {
+    final s = await CallService.start(
+      conversationId: widget.conversationId,
+      peerId: widget.otherId!,
+      peerName: _title,
+      peerAvatar: _otherAvatar,
+      kind: kind,
+    );
+    if (!mounted) return;
+    if (s == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('لا يمكن بدء المكالمة الآن — مكالمة جارية أو المحادثة لا تدعمها')));
+      return;
+    }
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => CallScreen(session: s)));
+  }
+
+  /// فتح غرفة الصوت الجماعية (0.18.0): للمجموعات الخاصة المشفّرة فقط
+  Future<void> _openVoiceRoom() async {
+    if (_isPrivateGroup) {
+      await showVoiceRoomIntro(
+          context, conversationId: widget.conversationId, title: _title);
+    }
+  }
+
+  Future<void> _showSafetyNumber() async {
+    final other = widget.otherId!;
+    final number = await E2eService.safetyNumber(other);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('رمز الأمان'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text(
+              'قارن هذا الرمز مع جوال الطرف الآخر وجهاً لوجه أو بمكالمة. إن تطابق فمحادثتكما مشفّرة ولا أحد في المنتصف.',
+              style: TextStyle(height: 1.6)),
+          const SizedBox(height: WaslSpace.lg),
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: SelectableText(number ?? 'المفاتيح غير جاهزة بعد',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: WaslFont.titleLarge, letterSpacing: 1.5, height: 1.7)),
+          ),
+        ]),
+        actions: [
+          if (number != null)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(c);
+                _openVerifyQr();
+              },
+              child: const Text('تحقق بمسح رمز QR'),
+            ),
+          if (number != null && E2eService.peerKeyChanged(other))
+            TextButton(
+              onPressed: () {
+                E2eService.acknowledgePeerKey(other);
+                Navigator.pop(c);
+              },
+              child: const Text('تحققت، أخفِ التنبيه'),
+            ),
+          FilledButton(onPressed: () => Navigator.pop(c), child: const Text('تم')),
+        ],
+      ),
+    );
+    if (mounted) {
+      setState(() {});
+      unawaited(_refreshVerified());
+    }
+  }
+
+  /// موافقة صريحة قبل إرسال نص محادثة مشفّرة إلى الذكاء الاصطناعي
+  Future<void> _confirmSummarize() async {
+    if (_e2e) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('تلخيص محادثة مشفّرة'),
+          content: const Text(
+              'للتلخيص، يفك جوالك آخر 80 رسالة ويرسل نصها إلى خادم وصل ثم إلى Google Gemini. هذا النص لن يكون مشفّراً بين الطرفين أثناء التلخيص. تتابع؟',
+              style: TextStyle(height: 1.6)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('لخّص')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    _showAiResult('ملخص المحادثة', _summarize());
+  }
+
+  // ---------- إرسال ----------
+  Future<void> _sendText() async {
+    final content = _text.text.trim();
+    if (content.isEmpty) return;
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
+    final editing = _editing;
+    final replyTo = _replyTo;
+    // لمسة 1.13.0: اهتزاز إرسال خفيف، واحتفال بأول رسالة في محادثة جديدة
+    AppStudioService.thump();
+    if (editing == null && _allMsgs.isEmpty && !widget.isChannel) {
+      ConfettiBurst.show(context);
+    }
+    var payload = content;
+    if (_e2e) {
+      final isDm = !widget.isGroup && widget.otherId != null;
+      if (isDm) {
+        // حد المحادثة الخاصة يتقلص بزيادة الأجهزة المرتبطة (v3)
+        final lim = await E2eService.dmPlainLimit(widget.otherId!);
+        if (utf8.encode(content).length > lim) {
+          _snack('الرسالة طويلة جداً');
+          return;
+        }
+      } else if (!E2eService.withinPlainLimit(content)) {
+        _snack('الرسالة طويلة جداً');
+        return;
+      }
+      if (isDm) {
+        // المحادثات الخاصة: جلسة متدرجة v2 (سرية أمامية) أو رجوع v1
+        try {
+          final p = await E2eService.encryptDmText(
+              widget.conversationId, widget.otherId!, content);
+          if (p == null) {
+            _snack(_keyMissingMsg());
+            return;
+          }
+          payload = p;
+        } catch (_) {
+          _snack('تعذّر تشفير الرسالة');
+          return;
+        }
+      } else {
+        final key = await _convKey();
+        if (key == null) {
+          _snack(_keyMissingMsg());
+          return;
+        }
+        try {
+          payload = await E2eService.encryptText(key, widget.conversationId, content);
+        } catch (_) {
+          _snack('تعذّر تشفير الرسالة');
+          return;
+        }
+      }
+    }
+    _text.clear();
+    if (mounted) setState(() {
+      _editing = null;
+      _replyTo = null;
+    });
+    if (editing != null) {
+      try {
+        await supabase
+            .rpc('edit_message', params: {'p_id': editing['id'], 'p_content': payload});
+      } catch (e) {
+        _snack(ModerationService.sendErrorHint(e) ??
+            'تعذّر تعديل الرسالة (التعديل متاح خلال 48 ساعة)');
+      }
+      return;
+    }
+    try {
+      // المرحلة 12 ب (0.29.0): زمن تأكيد الخادم للإرسال — قياس محلي صادق
+      final t0 = DateTime.now();
+      await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': 'text',
+        'content': payload,
+        if (replyTo != null) 'reply_to': replyTo['id'],
+      });
+      MetricsService.recordDelivery(
+          DateTime.now().difference(t0).inMilliseconds);
+    } catch (e) {
+      // المرحلة 13 أ (1.1.0): الحظر والكتم والسياسة لا يعاد المحاولة فيه —
+      // وما عداها (انقطاع الشبكة وأشباهه) يدخل الطابور ويرسل تلقائياً بالترتيب
+      final hint = ModerationService.sendErrorHint(e);
+      if (hint != null || BlockService.isBlockedError(e)) {
+        _snack(hint ?? 'لا يمكن الإرسال — الحظر مفعّل بينكما');
+      } else {
+        final q = await OfflineQueueService.enqueueText(
+          conversationId: widget.conversationId,
+          content: payload,
+          replyTo: replyTo?['id'] as String?,
+        );
+        _snack(q
+            ? 'انقطع الاتصال — حُفظت رسالتك على جهازك وستُرسل تلقائياً عند عودته'
+            : 'تعذّر إرسال الرسالة — طابور عدم الاتصال ممتلئ');
+      }
+    }
+  }
+
+  Future<void> _sendMedia({
+    required String type,
+    required Uint8List bytes,
+    required String ext,
+    required String contentType,
+    int? durationMs,
+    Map<String, dynamic>? meta,
+    bool viewOnce = false,
+    String? groupId,
+    VideoPosterDraft? poster,
+  }) async {
+    setState(() => _uploading = true);
+    // المرحلة 13 أ (1.1.0): تعريفات خارج try كي يبنيها الطابور عند الفشل
+    final replyTo = _replyTo;
+    var content = '';
+    var metaMap = meta == null
+        ? <String, dynamic>{
+            'duration': ?durationMs,
+          }
+        : Map<String, dynamic>.from(meta);
+    // ج4: معاينة ضبابية + أبعاد للصور تُدمج في الميتا نفسها (تُشفَّر معها
+    // في المحادثات المشفرة) — الفشل لا يمنع الإرسال إطلاقاً
+    if (type == 'image') {
+      final pv = await MediaPreview.compute(bytes);
+      if (pv != null) metaMap.addAll(pv.toMeta());
+    }
+    // ج5: ملصق الفيديو — الضبابية/الأبعاد/المدة تُدمج الآن، ومسار الملصق
+    // ("thumb") بعد رفعه بمفتاح الوسيط نفسه أدناه. «عرض مرة» بلا ملصق أبداً.
+    if (type == 'video' && poster != null && !viewOnce) {
+      metaMap.addAll(poster.toMeta());
+    }
+    var payload = bytes;
+    var upExt = ext;
+    var upType = contentType;
+    var dmRatchet = false;
+    String? uploadedPath;
+    try {
+      if (_e2e) {
+        // المرحلة 10 (0.24.0): الوسائط في الخاص على الجلسة المتدرجة — كل وسيط
+        // بمفتاح محتوى عشوائي خاص به (mk) يُغلَّف داخل ميتا الرسالة المشفرة
+        // بالجلسة نفسها (سرية أمامية للوسائط كالنصوص)، والمجموعات تبقى على
+        // مفتاحها المغلف كما هي، والقديمة بلا mk تُقرأ بمفتاح v1 رجوعاً
+        final key = await _convKey();
+        if (key == null) {
+          _snack(_keyMissingMsg());
+          return;
+        }
+        dmRatchet = !widget.isGroup && widget.otherId != null;
+        if (dmRatchet) {
+          final mk = await E2eService.newContentKey();
+          metaMap['mk'] = base64Encode(await mk.extractBytes());
+          payload = await E2eService.encryptBytes(mk, widget.conversationId, bytes);
+          if (type == 'video' && poster != null && !viewOnce) {
+            await _attachPoster(metaMap, poster.jpeg, key: mk);
+          }
+        } else {
+          payload = await E2eService.encryptBytes(key, widget.conversationId, bytes);
+          if (type == 'video' && poster != null && !viewOnce) {
+            await _attachPoster(metaMap, poster.jpeg, key: key);
+          }
+        }
+        final content0 = jsonEncode(metaMap);
+        if (dmRatchet) {
+          final p = await E2eService.encryptDmText(
+              widget.conversationId, widget.otherId!, content0);
+          if (p == null) {
+            _snack(_keyMissingMsg());
+            return;
+          }
+          content = p;
+        } else {
+          content = await E2eService.encryptText(key, widget.conversationId, content0);
+        }
+        upExt = 'enc.bin';
+        upType = 'application/octet-stream';
+      } else {
+        if (type == 'video' && poster != null && !viewOnce) {
+          await _attachPoster(metaMap, poster.jpeg);
+        }
+        content = metaMap.isEmpty ? '' : jsonEncode(metaMap);
+      }
+      final path = await MediaService.upload(
+        conversationId: widget.conversationId,
+        bytes: payload,
+        ext: upExt,
+        contentType: upType,
+      );
+      uploadedPath = path;
+      // المرحلة 12 ب (0.29.0): زمن تأكيد الخادم للوسائط أيضاً — قياس محلي صادق
+      final t0 = DateTime.now();
+      final ins = await supabase.from('messages').insert({
+        'conversation_id': widget.conversationId,
+        'sender_id': _me,
+        'type': type,
+        'content': content,
+        'media_url': path,
+        'duration_ms': durationMs,
+        if (viewOnce) 'view_once': true,
+        'media_group_id': ?groupId,
+        if (replyTo != null) 'reply_to': replyTo['id'],
+      }).select('id').single();
+      MetricsService.recordDelivery(
+          DateTime.now().difference(t0).inMilliseconds);
+      // رسائلي المرسلة: mk يُخزّن برسالة فوراً فتُقرأ وسائطي بعد أي تدوير جلسة
+      if (dmRatchet) {
+        await E2eService.rememberMediaKey(
+            widget.conversationId, ins['id'] as String?, jsonEncode(metaMap));
+      }
+      if (mounted) setState(() {
+        _replyTo = null;
+        _viewOnce = false;
+      });
+    } catch (e) {
+      // المرحلة 13 أ (1.1.0): الحظر والكتم والسياسة لا يعاد المحاولة فيه —
+      // وما عداها يدخل الطابور (الوسيط الذي رُفع يُعاد استعمال مساره لا
+      // يُرفع ثانية) فيرسل تلقائياً بالترتيب عند عودة الشبكة
+      final hint = ModerationService.sendErrorHint(e);
+      if (hint != null || BlockService.isBlockedError(e)) {
+        _snack(hint ?? 'لا يمكن الإرسال — الحظر مفعّل بينكما');
+      } else {
+        final q = await OfflineQueueService.enqueueMedia(
+          conversationId: widget.conversationId,
+          bytes: payload,
+          type: type,
+          content: content,
+          ext: upExt,
+          contentType: upType,
+          uploadPath: uploadedPath,
+          durationMs: durationMs,
+          viewOnce: viewOnce,
+          groupId: groupId,
+          replyTo: replyTo?['id'] as String?,
+          rememberKey: dmRatchet ? jsonEncode(metaMap) : null,
+        );
+        _snack(q
+            ? 'انقطع الاتصال — حُفظت الرسالة على جهازك وستُرسل تلقائياً عند عودته'
+            : 'تعذّر رفع الملف — طابور عدم الاتصال ممتلئ');
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// ج5: يرفع ملصق الفيديو بمسار رفع الوسائط ذاته — مشفّراً بمفتاح الوسيط
+  /// نفسه ([key]: mk في الخاص، مفتاح المجموعة في المجموعات) بامتداد .enc.bin،
+  /// أو JPEG صريحاً في المحادثات غير المشفرة — ثم يضع مساره في الميتا.
+  /// الفشل (انقطاع مثلاً) صامت: يُرسل الفيديو بالضبابية فقط أو كما كان.
+  Future<void> _attachPoster(Map<String, dynamic> metaMap, Uint8List jpeg,
+      {SecretKey? key}) async {
+    try {
+      final enc = key != null;
+      final bytes =
+          enc ? await E2eService.encryptBytes(key, widget.conversationId, jpeg) : jpeg;
+      final path = await MediaService.upload(
+        conversationId: widget.conversationId,
+        bytes: bytes,
+        ext: enc ? 'thumb.enc.bin' : 'thumb.jpg',
+        contentType: enc ? 'application/octet-stream' : 'image/jpeg',
+      );
+      metaMap['thumb'] = path;
+    } catch (_) {}
+  }
+
+  // ---------- الصور ----------
+
+  /// صورة واحدة (معرض أو كاميرا): تمر عبر محرر الصورة المحلي قبل الإرسال —
+  /// «تخطي» في المحرر يعيد نفس البايتات الأصلية.
+  Future<void> _pickImage(ImageSource source) async {
+    final x = await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 80);
+    if (x == null) return;
+    var bytes = await x.readAsBytes();
+    final edited = await ImageEditorScreen.open(context, bytes, fileName: x.name);
+    if (edited == null) return; // المستخدم رفض الإرسال من المحرر
+    bytes = edited;
+    final (ext, mime) = ImageEditService.contentTypeOf(bytes);
+    await _sendMedia(
+      type: 'image',
+      bytes: bytes,
+      ext: ext,
+      contentType: mime,
+      viewOnce: _viewOnce,
+    );
+  }
+
+  /// الصورة المشتركة من المتصفح (1.22.0): تُستهلك مرة واحدة من المركز
+  /// (عمرها 10 دقائق وإلا سقطت بصدق) وتمر بالمحرر نفسه الذي تمر به
+  /// صورة المعرض — «تخطي» في المحرر يعني المستخدم رفض الإرسال
+  Future<void> _consumeSharedImage() async {
+    final bytes = SharedImageHub.consume();
+    if (bytes == null || !mounted) return;
+    final edited = await ImageEditorScreen.open(
+        context, Uint8List.fromList(bytes),
+        fileName: 'shared.png');
+    if (edited == null || !mounted) return; // المستخدم رفض الإرسال
+    final (ext, mime) = ImageEditService.contentTypeOf(edited);
+    await _sendMedia(
+      type: 'image',
+      bytes: edited,
+      ext: ext,
+      contentType: mime,
+      viewOnce: _viewOnce,
+    );
+  }
+
+  /// ردود بوتات الكتالوج المركبة (1.22.0): أوامر الغرفة الثلاثة تحوّل
+  /// القوالب الموثقة مسودات في صندوق الكتابة — يراجعها صاحب الغرفة
+  /// ويرسلها باسمه، بلا إرسال تلقائي ولا انتحال هوية بوت
+  Future<void> _openBotDraftsSheet() async {
+    final bots = await CatalogBotStore.forConversation(widget.conversationId);
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(WaslRadius.xl))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(WaslSpace.xl),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('ردود بوتات الكتالوج',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: WaslFont.title)),
+            const SizedBox(height: WaslSpace.sm),
+            Text(
+                'قوالب موثقة تصير مسودة في صندوق الكتابة باسمك أنت — مراجعة قبل الإرسال.',
+                style: TextStyle(
+                    fontSize: WaslFont.meta, color: context.textSecondary)),
+            const SizedBox(height: WaslSpace.md),
+            if (bots.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: WaslSpace.md),
+                child: Text(
+                    'لا بوتات كتالوج مركبة في هذه الغرفة — ركّبها من شاشة البوتات › كتالوج المجتمع',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: WaslFont.meta, color: context.textSecondary)),
+              ),
+            for (final b in bots) ...[
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.smart_toy_outlined,
+                    color: b.enabled ? WaslColors.violet : context.textFaint),
+                title: Text('${b.displayName} (${b.username})',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: WaslFont.body)),
+                subtitle: Text(
+                    b.enabled ? 'مركّب ونشط' : 'معطّل — لا مسودات منه',
+                    style: TextStyle(fontSize: WaslFont.small, color: context.textFaint)),
+              ),
+              if (b.enabled)
+                Wrap(
+                  spacing: WaslSpace.sm,
+                  runSpacing: WaslSpace.sm,
+                  children: [
+                    for (final cmd in CatalogBotRunner.commands)
+                      if (b.templates.any((t) =>
+                          (cmd == CatalogBotRunner.welcomeCommand &&
+                              t.type == CatalogTemplateType.welcome) ||
+                          (cmd == CatalogBotRunner.attendanceCommand &&
+                              t.type == CatalogTemplateType.attendance) ||
+                          (cmd == CatalogBotRunner.suggestionsCommand &&
+                              t.type == CatalogTemplateType.suggestions)))
+                        ActionChip(
+                          label: Text(cmd),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            final drafts = CatalogBotRunner.respond(
+                                message: cmd, bots: [b]);
+                            if (drafts.isEmpty || !mounted) return;
+                            setState(() {
+                              _text.text =
+                                  CatalogBotRunner.draftText(drafts.first);
+                            });
+                          },
+                        ),
+                  ],
+                ),
+              const SizedBox(height: WaslSpace.sm),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// الألبوم المتعدد (0.20.0): حتى 10 صور بمعاينة متسلسلة ثم إرسال
+  /// مشفر قطعة قطعة بمعرّف مجموعة واحد يجمّع العرض عند الجميع
+  Future<void> _pickAlbum() async {
+    final picked = await _picker.pickMultiImage(
+        limit: AlbumService.maxItems, maxWidth: 1600, imageQuality: 80);
+    if (picked.isEmpty) return;
+    final chosen = await AlbumPreviewScreen.open(context, picked);
+    if (chosen == null || chosen.isEmpty || !mounted) return;
+    if (_isMuted) {
+      _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
+      return;
+    }
+    final gid = AlbumService.newGroupId();
+    setState(() => _uploading = true);
+    try {
+      for (final f in chosen) {
+        if (!mounted) return;
+        try {
+          final bytes = await f.readAsBytes();
+          await _sendMedia(
+            type: 'image',
+            bytes: bytes,
+            ext: 'jpeg',
+            contentType: 'image/jpeg',
+            groupId: gid,
+          );
+        } catch (_) {
+          // قطعة فاشلة لا تكسر البقية
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  static const _maxBytes = MediaLimits.maxMediaBytes;
+
+  Future<void> _pickVideo() async {
+    final x = await _picker.pickVideo(
+        source: ImageSource.gallery, maxDuration: const Duration(minutes: 5));
+    if (x == null) return;
+    final size = await x.length();
+    if (size > _maxBytes) {
+      _snack('الفيديو أكبر من ${MediaLimits.maxMediaText}');
+      return;
+    }
+    final bytes = await x.readAsBytes();
+    final ext = x.name.contains('.') ? x.name.split('.').last.toLowerCase() : 'mp4';
+    // ج5: ملصق من إطار ~0.8ث (أندرويد/iOS) — الويب/سطح المكتب/الفشل ⇒ null
+    final viewOnce = _viewOnce;
+    final poster = viewOnce || kIsWeb ? null : await VideoPreviewService.prepare(x.path);
+    await _sendMedia(
+      type: 'video',
+      bytes: bytes,
+      ext: ext,
+      contentType: ext == 'mov' ? 'video/quicktime' : 'video/mp4',
+      meta: {'name': x.name, 'size': size},
+      viewOnce: viewOnce,
+      durationMs: poster?.durationMs,
+      poster: poster,
+    );
+  }
+
+  Future<void> _pickFile() async {
+    final r = await FilePicker.platform.pickFiles(withData: true);
+    final f = r?.files.single;
+    if (f == null) return;
+    if (f.size > _maxBytes || f.bytes == null) {
+      _snack(f.bytes == null
+          ? 'تعذّر قراءة الملف'
+          : 'الملف أكبر من ${MediaLimits.maxMediaText}');
+      return;
+    }
+    final ext = (f.extension ?? 'bin').toLowerCase();
+    await _sendMedia(
+      type: 'file',
+      bytes: f.bytes!,
+      ext: ext.length > 8 ? 'bin' : ext,
+      contentType: 'application/octet-stream',
+      meta: {'name': f.name, 'size': f.size},
+    );
+  }
+
+  /// يفك الملف إلى مجلد مؤقت ثم يفتحه (الفيديو داخل التطبيق، وغيره بتطبيق مناسب)
+  Future<void> _openMedia(Map<String, dynamic> m) async {
+    if (m['shield_removed'] == true) return;
+    final prot = m['protected'] == true && m['sender_id'] != _me;
+    if (prot && m['type'] != 'video') {
+      _snack('🛡️ ملف محمي: لا يُفتح خارج وصل شات');
+      return;
+    }
+    if (kIsWeb) return _openMediaWeb(m);
+    setState(() => _uploading = true);
+    try {
+      final bytes = await _mediaBytes(m);
+      if (bytes == null) {
+        _snack('تعذّر تنزيل الملف');
+        return;
+      }
+      final meta = _metaOf(m);
+      var name = (meta?['name'] as String?) ?? (m['type'] == 'video' ? 'video.mp4' : 'file');
+      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final dir = Directory('${(await getTemporaryDirectory()).path}/wasl_open');
+      await dir.create(recursive: true);
+      final file = File('${dir.path}/${DateTime.now().millisecondsSinceEpoch}_$name');
+      await file.writeAsBytes(bytes, flush: true);
+      if (!mounted) return;
+      if (m['type'] == 'video') {
+        if (prot) await ScreenshotService.setSecure(true);
+        if (!mounted) return;
+        await Navigator.push(
+            context, MaterialPageRoute(builder: (_) => VideoScreen(file: file)));
+        if (prot) await ScreenshotService.setSecure(_noScreenshots);
+        if (prot) unawaited(file.delete().catchError((_) => file));
+      } else {
+        final res = await OpenFilex.open(file.path);
+        if (res.type != ResultType.done) _snack('لا يوجد تطبيق يفتح هذا الملف');
+      }
+    } catch (_) {
+      _snack('تعذّر فتح الملف');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// الويب: الفيديو يُشغَّل من رابط blob، والملفات تُنزَّل عبر المتصفح
+  Future<void> _openMediaWeb(Map<String, dynamic> m) async {
+    setState(() => _uploading = true);
+    try {
+      final bytes = await _mediaBytes(m);
+      if (bytes == null) {
+        _snack('تعذّر تنزيل الملف');
+        return;
+      }
+      final meta = _metaOf(m);
+      var name = (meta?['name'] as String?) ?? (m['type'] == 'video' ? 'video.mp4' : 'file');
+      name = name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      if (!mounted) return;
+      if (m['type'] == 'video') {
+        final mime = name.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
+        final url = webBlobUrl(bytes, mime);
+        await Navigator.push(
+            context, MaterialPageRoute(builder: (_) => VideoScreen(url: url)));
+      } else {
+        webDownload(bytes, name, 'application/octet-stream');
+      }
+    } catch (_) {
+      _snack('تعذّر فتح الملف');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  void _showAttachSheet() {
+    showWaslSheet<void>(
+      context,
+      title: 'إرسال',
+      titleIcon: Icons.attach_file_rounded,
+      children: (ctx) => [
+        SheetActionGrid([
+          SheetAction(Icons.photo_library_rounded,
+              _viewOnce ? 'صورة · مرة' : 'المعرض', WaslColors.teal, () {
+            Navigator.pop(ctx);
+            _pickImage(ImageSource.gallery);
+          }),
+          if (!kIsWeb)
+            SheetAction(Icons.photo_camera_rounded, 'الكاميرا', WaslColors.indigo, () {
+              Navigator.pop(ctx);
+              _pickImage(ImageSource.camera);
+            }),
+          SheetAction(Icons.collections_rounded, 'ألبوم', WaslColors.pink, () {
+            Navigator.pop(ctx);
+            _pickAlbum();
+          }),
+          SheetAction(Icons.movie_rounded, 'فيديو', WaslColors.violet, () {
+            Navigator.pop(ctx);
+            _pickVideo();
+          }),
+          SheetAction(Icons.description_rounded, 'ملف', WaslColors.warning, () {
+            Navigator.pop(ctx);
+            _pickFile();
+          }),
+          // الموقع (2.3.0): GPS + تأكيد المستخدم — الإحداثيات تُشفَّر كالنص
+          SheetAction(Icons.location_on_rounded, 'موقعي', WaslColors.teal, () {
+            Navigator.pop(ctx);
+            _sendMyLocation();
+          }),
+          // الموقع على الخريطة (2.3.1): اختيار أي نقطة لا موقعك الحالي فقط
+          SheetAction(Icons.map_rounded, 'على الخريطة', WaslColors.indigo, () {
+            Navigator.pop(ctx);
+            _pickLocation();
+          }),
+          // ردود بوتات الكتالوج (1.22.0): بوت الكتالوج هنا لا يقرأ شيئاً —
+          // نص يصوغه صاحب الغرفة من قالب موثق ويرسله باسمه، فتجوع أي غرفة
+          // جماعية يملك الإرسال فيها (المشفرة يشملها: لا يتسرب منها نص)
+          if (widget.isGroup && widget.canPost)
+            SheetAction(Icons.smart_toy_outlined, 'ردود البوت الجاهزة',
+                WaslColors.violet, () {
+              Navigator.pop(ctx);
+              _openBotDraftsSheet();
+            }),
+        ]),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(WaslSpace.lg, WaslSpace.sm, WaslSpace.lg, WaslSpace.xs),
+          child: StatefulBuilder(
+            builder: (ctx2, setSheet) => Container(
+              decoration: BoxDecoration(
+                color: _viewOnce
+                    ? WaslColors.danger.withValues(alpha: 0.12)
+                    : context.glass,
+                borderRadius: BorderRadius.circular(WaslRadius.lg),
+              ),
+              child: SwitchListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(WaslRadius.lg)),
+                secondary: Icon(Icons.looks_one_rounded,
+                    color: _viewOnce ? WaslColors.danger : context.textTertiary),
+                title: const Text('عرض مرة واحدة',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('الصورة أو الفيديو التالي يُحذف بعد مشاهدته',
+                    style: TextStyle(fontSize: WaslFont.meta, color: context.textFaint)),
+                value: _viewOnce,
+                onChanged: (v) {
+                  setState(() => _viewOnce = v);
+                  setSheet(() {});
+                },
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(WaslSpace.xxl, WaslSpace.sm, WaslSpace.xxl, 0),
+          child: Text('الحد الأقصى للفيديو والملفات ${MediaLimits.maxMediaText}',
+              style: TextStyle(fontSize: WaslFont.small, color: context.textFaint)),
+        ),
+      ],
+    );
+  }
+
+  // ---------- التسجيل الصوتي (اضغط مطولاً) ----------
+  Future<void> _startRec() async {
+    if (!await _recorder.hasPermission()) {
+      _snack('اسمح للتطبيق باستخدام الميكروفون');
+      return;
+    }
+    if (kIsWeb) {
+      // المتصفح يسجّل Opus داخل WebM، والمسار يُتجاهل
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.opus), path: '');
+    } else {
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+    }
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    if (mounted) setState(() {
+      _recording = true;
+      _recStart = DateTime.now();
+    });
+  }
+
+  Future<void> _stopRec({bool cancel = false}) async {
+    if (!_recording) return;
+    _ticker?.cancel();
+    final path = await _recorder.stop();
+    final ms = DateTime.now().difference(_recStart!).inMilliseconds;
+    if (mounted) setState(() => _recording = false);
+    if (cancel || path == null || ms < 700) return;
+    final bytes = await XFile(path).readAsBytes();
+    await _sendMedia(
+      type: 'voice',
+      bytes: bytes,
+      ext: kIsWeb ? 'webm' : 'm4a',
+      contentType: kIsWeb ? 'audio/webm' : 'audio/mp4',
+      durationMs: ms,
+    );
+  }
+
+  String _recLabel() {
+    final s = _recStart == null ? 0 : DateTime.now().difference(_recStart!).inSeconds;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  String _time(String iso) {
+    final d = DateTime.parse(iso).toLocal();
+    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// 2.5.0: رسالتان في سلسلة واحدة؟ المرسل نفسه، خلال 5 دقائق، ولا إحداهما
+  /// محذوفة — تُجمَّعان بصرياً (زوايا ملتصقة واسم المرسل مرة واحدة)
+  bool _sameRun(Map<String, dynamic>? a, Map<String, dynamic>? b) {
+    if (a == null || b == null) return false;
+    if (a['sender_id'] != b['sender_id']) return false;
+    final ta = DateTime.tryParse(a['created_at'] as String? ?? '');
+    final tb = DateTime.tryParse(b['created_at'] as String? ?? '');
+    if (ta == null || tb == null) return false;
+    return tb.difference(ta).inMinutes.abs() < 5;
+  }
+
+  /// فاصل اليوم فوق [m] حين يبدأ يوماً جديداً مقارنة بالأقدم منه [older]
+  Widget? _dayChipFor(Map<String, dynamic> m, Map<String, dynamic>? older) {
+    final t = DateTime.tryParse(m['created_at'] as String? ?? '')?.toLocal();
+    if (t == null) return null;
+    if (older != null) {
+      final o = DateTime.tryParse(older['created_at'] as String? ?? '')?.toLocal();
+      if (o != null && calendarDaysBetween(o, t) == 0) return null;
+    }
+    return WaslDayChip(dayLabel(t));
+  }
+
+  /// تنزيل وسيط وفكّ تشفيره إن كان مشفّراً (null = فشل)
+  /// الخاص: مفتاح الوسيط عبر dmMediaKey (mk المخزّن أو الميتا أو v1 للقديم)
+  /// Wasl Shield: بلاغ عاجل بأدلة من المحادثة كما تظهر على هذا الجهاز (بعد فك التشفير)
+  Future<void> _openShieldReport(String? targetId) async {
+    final target = targetId ?? (widget.isGroup ? null : widget.otherId);
+    final items = <ShieldEvidenceItem>[];
+    for (final m in _allMsgs.reversed) {
+      if (m['deleted_at'] != null) continue;
+      final type = (m['type'] as String?) ?? 'text';
+      final sender = m['sender_id'] as String?;
+      final isMedia = type != 'text' && m['media_url'] != null && m['shield_removed'] != true;
+      items.add(ShieldEvidenceItem(
+        id: m['id'] as String,
+        fromTarget: target != null ? sender == target : sender != _me,
+        senderName: sender == _me ? 'أنا' : _senderName(sender),
+        at: (m['created_at'] as String?) ?? '',
+        text: type == 'text' ? _textOf(m) : null,
+        mediaType: isMedia ? type : null,
+        loader: isMedia ? () => _mediaBytes(m) : null,
+      ));
+    }
+    await showShieldReportSheet(context,
+        conversationId: widget.conversationId,
+        targetUserId: target,
+        targetName: target == null ? widget.title : _senderName(target),
+        items: items);
+    if (target != null) _refreshBlockState();
+  }
+
+  Future<Uint8List?> _mediaBytes(Map<String, dynamic> m) =>
+      _mediaBytesAt(m, m['media_url'] as String?);
+
+  /// ج5: ملصق الفيديو بمفتاح وسيط الرسالة نفسه (المسار مفحوص داخل مجلد
+  /// هذه المحادثة في VideoPoster.fromMeta)
+  Future<Uint8List?> _posterBytes(Map<String, dynamic> m, String thumb) =>
+      _mediaBytesAt(m, thumb);
+
+  Future<Uint8List?> _mediaBytesAt(Map<String, dynamic> m, String? path) async {
+    try {
+      if (path == null) return null;
+      final raw = await MediaService.download(path);
+      if (!E2eService.isEncryptedPath(path) || !_e2e) return raw;
+      if (!widget.isGroup) {
+        if (widget.otherId == null) return null;
+        final key = await E2eService.dmMediaKey(
+          conversationId: widget.conversationId,
+          otherUserId: widget.otherId!,
+          messageId: m['id'] as String?,
+          meta: _metaOf(m),
+        );
+        if (key == null) return null;
+        return await E2eService.decryptBytes(key, widget.conversationId, raw);
+      }
+      var out = await E2eService.decryptGroupBytes(widget.conversationId, raw);
+      if (out == null) {
+        E2eService.invalidateGroupKey(widget.conversationId);
+        out = await E2eService.decryptGroupBytes(widget.conversationId, raw);
+      }
+      return out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------- عرض مرة واحدة ----------
+
+  Widget _viewOnceBody(Map<String, dynamic> m) {
+    final mine = m['sender_id'] == _me;
+    final viewed = m['viewed_at'] != null;
+    // المرسل يفتح نسخته حتى أول مشاهدة؛ المستلم مرة واحدة فقط
+    final canOpen = !viewed;
+    return ViewOnceCard(
+      mine: mine,
+      viewed: viewed,
+      mediaType: m['type'] as String? ?? 'image',
+      onTap: canOpen ? () => _openViewOnce(m) : null,
+    );
+  }
+
+  /// فتح وسيط «عرض مرة واحدة»: تنزيل وفك أولاً، ثم تسجيل المشاهدة (RPC)،
+  /// ثم عرض بمنع لقطات الشاشة — والوسيط يحذفه الخادم عند اكتمال المشاهدات.
+  Future<void> _openViewOnce(Map<String, dynamic> m) async {
+    setState(() => _uploading = true);
+    final wasSecure = await ScreenshotService.flagOf(widget.conversationId);
+    var secured = false;
+    try {
+      final bytes = await _mediaBytes(m);
+      if (bytes == null) {
+        _snack('انتهى هذا الوسيط أو تعذّر فك تشفيره');
+        return;
+      }
+      // سجّل المشاهدة قبل العرض (قد يحذف الخادم الملف فوراً) — بصمت عند فشل مؤقت
+      if (m['sender_id'] != _me) {
+        try {
+          await supabase.rpc('open_view_once', params: {'p_id': m['id']});
+        } catch (_) {}
+      }
+      if (!kIsWeb && !wasSecure) {
+        await ScreenshotService.setSecure(true);
+        secured = true;
+      }
+      if (!mounted) return;
+      if (m['type'] == 'video') {
+        if (kIsWeb) {
+          final url = webBlobUrl(bytes, 'video/mp4');
+          await Navigator.push(context,
+              MaterialPageRoute(builder: (_) => VideoScreen(url: url)));
+        } else {
+          final dir = await getTemporaryDirectory();
+          final f = File(
+              '${dir.path}/view_once_${DateTime.now().millisecondsSinceEpoch}.mp4');
+          await f.writeAsBytes(bytes, flush: true);
+          if (!mounted) return;
+          await Navigator.push(context,
+              MaterialPageRoute(builder: (_) => VideoScreen(file: f)));
+        }
+      } else {
+        await Navigator.push(context,
+            MaterialPageRoute(builder: (_) => ViewOnceImageScreen(bytes: bytes)));
+      }
+    } catch (_) {
+      _snack('تعذّر فتح الوسيط');
+    } finally {
+      if (secured) await ScreenshotService.setSecure(wasSecure);
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  /// فقاعة الألبوم المتعدد (0.20.0): شبكة صور متتالية بمربع واحد،
+  /// اسم المرسل فوقها والوقت تحتها — الضغط على أي صورة يفتحها بملء الشاشة
+  /// والضغط المطول يفتح إجراءات أول قطعة.
+  Widget _albumTile(List<Map<String, dynamic>> item) {
+    final first = item.first;
+    final mine = first['sender_id'] == _me;
+    final sender = _names[first['sender_id']];
+    final width = math.min(MediaQuery.of(context).size.width * 0.78, 520.0);
+    final tile = (width - 6) / 3;
+    final firstTime = _motionSeen.add('album_${first['id']}');
+    Widget bubble = GestureDetector(
+      onLongPress: () => _messageActions(first),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: WaslSpace.xs),
+        padding: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, WaslSpace.sm),
+        constraints: BoxConstraints(maxWidth: width),
+        decoration: _look.decoration(mine: mine, otherBase: context.bubbleOther),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.isGroup && !mine && sender != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: WaslSpace.xs),
+                child: Text(sender,
+                    style: TextStyle(
+                        color: context.senderColor(first['sender_id'] as String?),
+                        fontSize: WaslFont.meta,
+                        fontWeight: FontWeight.w800)),
+              ),
+            Wrap(
+              spacing: WaslSpace.xs,
+              runSpacing: WaslSpace.xs,
+              children: [
+                for (final m in item)
+                  SizedBox(
+                    width: tile,
+                    height: tile,
+                    child: ImageBubble(
+                        loader: () => _mediaBytes(m),
+                        protected: m['protected'] == true,
+                        preview: MediaPreview.fromMeta(_metaOf(m)),
+                        width: tile,
+                        height: tile),
+                  ),
+              ],
+            ),
+            const SizedBox(height: WaslSpace.xxs),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('${item.length} وسائط',
+                  style: TextStyle(
+                      color: mine ? _ink.tertiary : context.textTertiary,
+                      fontSize: WaslFont.caption)),
+              const SizedBox(width: WaslSpace.sm),
+              Text(_time(first['created_at'] as String),
+                  style: TextStyle(
+                      color: mine ? _ink.secondary : context.textSecondary,
+                      fontSize: WaslFont.caption)),
+              if (mine) ...[const SizedBox(width: WaslSpace.xs), _ticks(item.last)],
+            ]),
+          ],
+        ),
+      ),
+    );
+    if (firstTime) {
+      bubble = MotionBubble(child: bubble, mine: mine);
+    }
+    return Align(
+      alignment: mine
+          ? AlignmentDirectional.centerEnd
+          : AlignmentDirectional.centerStart,
+      child: bubble,
+    );
+  }
+
+  Widget _body(Map<String, dynamic> m) {
+    if (m['deleted_at'] != null) {
+      final mine = m['sender_id'] == _me;
+      final c = mine ? _ink.tertiary : context.textTertiary;
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.block, size: 16, color: c),
+        const SizedBox(width: WaslSpace.sm),
+        Text('حُذفت هذه الرسالة',
+            style: TextStyle(color: c, fontStyle: FontStyle.italic)),
+      ]);
+    }
+    if (m['shield_removed'] == true) {
+      final c = m['sender_id'] == _me ? _ink.secondary : context.textTertiary;
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.shield_rounded, size: 16, color: c),
+        const SizedBox(width: WaslSpace.sm),
+        Text('أُزيلت هذه الوسائط للحماية', style: TextStyle(color: c, fontStyle: FontStyle.italic)),
+      ]);
+    }
+    if (m['view_once'] == true &&
+        (m['type'] == 'image' || m['type'] == 'video')) {
+      return _viewOnceBody(m);
+    }
+    if (m['type'] == 'video') {
+      // ج5: ملصق (ضبابية ثم صورة) بزر تشغيل ومدة — القديمة تهبط للبطاقة أدناه
+      final vp = VideoPoster.fromMeta(_metaOf(m),
+          durationMs: (m['duration_ms'] as num?)?.toInt(),
+          conversationId: widget.conversationId);
+      if (vp.hasPreview) {
+        final thumb = vp.thumbPath;
+        return VideoBubble(
+          poster: vp,
+          posterLoader: thumb == null ? null : () => _posterBytes(m, thumb),
+          onTap: () => _openMedia(m),
+          protected: m['protected'] == true,
+          messageId: m['id'] as String?,
+        );
+      }
+    }
+    switch (m['type'] as String? ?? 'text') {
+      case 'location':
+        return _locationBubble(m);
+      case 'image':
+        // ج4: معاينة ضبابية + أبعاد من الميتا (المفكوكة) — القديمة بلا ميتا تهبط للهيكل
+        return ImageBubble(
+            loader: () => _mediaBytes(m),
+            protected: m['protected'] == true,
+            preview: MediaPreview.fromMeta(_metaOf(m)),
+            messageId: m['id'] as String?);
+      case 'voice':
+        return VoiceBubble(
+            loader: () => _mediaBytes(m),
+            durationMs: m['duration_ms'] as int?);
+      case 'video':
+      case 'file':
+        final isVideo = m['type'] == 'video';
+        final meta = _metaOf(m);
+        final name = (meta?['name'] as String?) ?? (isVideo ? 'فيديو' : 'ملف');
+        final mine = m['sender_id'] == _me;
+        return InkWell(
+          borderRadius: BorderRadius.circular(WaslRadius.md),
+          onTap: () => _openMedia(m),
+          child: Container(
+            padding: const EdgeInsets.all(WaslSpace.md),
+            decoration: BoxDecoration(
+              color: mine
+                  ? _ink.quoteFill
+                  : context.glass,
+              borderRadius: BorderRadius.circular(WaslRadius.md),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(isVideo ? Icons.play_circle_fill : Icons.insert_drive_file_rounded,
+                  size: 36, color: mine ? _ink.primary : context.iconStd),
+              const SizedBox(width: WaslSpace.md),
+              Flexible(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: mine ? _ink.primary : context.textPrimary,
+                          fontWeight: FontWeight.w600)),
+                  Text(
+                      [
+                        isVideo ? 'فيديو' : 'ملف',
+                        _sizeLabel((meta?['size'] as num?)?.toInt()),
+                      ].where((e) => e.isNotEmpty).join(' · '),
+                      style: TextStyle(
+                          color: mine ? _ink.secondary : context.textSecondary,
+                          fontSize: WaslFont.small)),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      default:
+        final text = _textOf(m);
+        final mine = m['sender_id'] == _me;
+        final shown = text ?? '🔒 جارٍ فك التشفير…';
+        // معاينة الروابط (0.21.0): بطاقة تحت النص إن كان يضم رابطاً عاماً —
+        // بلا رابط أو ميزة معطلة أو فشل جلب: لا بطاقة إطلاقاً (هبوط صامت)
+        final hasUrl = text != null &&
+            text.isNotEmpty &&
+            !text.startsWith('{') &&
+            !E2eService.isEncrypted(text) &&
+            LinkPreviewService.enabled.value &&
+            LinkPreviewService.extractFirstUrl(text) != null;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 2.5.0 (ج3): الوقت يجلس على السطر الأخير إن اتسع (واتساب/تيليجرام)
+            BubbleInlineAnchor(
+              child: Text(shown,
+                  style: TextStyle(
+                      color: mine ? _ink.primary : context.textPrimary,
+                      fontSize: WaslFont.title)),
+            ),
+            if (hasUrl && m['deleted_at'] == null)
+              LinkPreviewCard(
+                  text: text, mine: mine, ink: mine ? _ink.primary : null),
+          ],
+        );
+    }
+  }
+
+  /// سطر الترجمة الفورية تحت رسالة واردة — أو مؤشر «جارٍ الترجمة»
+  Widget _translationLine(Map<String, dynamic> m) {
+    final id = m['id'] as String;
+    final t = _translations[id];
+    if (t == null) {
+      if (_translating.contains(id)) {
+        return Padding(
+          padding: const EdgeInsets.only(top: WaslSpace.xs),
+          child: Text('جارٍ الترجمة…',
+              style: TextStyle(
+                  color: mineColor(m), fontSize: WaslFont.small, fontStyle: FontStyle.italic)),
+        );
+      }
+      return const SizedBox.shrink(); // لم تصل ترجمتها بعد — تظهر عند جهوزها
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: WaslSpace.xs),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(WaslSpace.sm, WaslSpace.xs, WaslSpace.sm, WaslSpace.xs),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(WaslRadius.sm),
+        ),
+        child: Text(t,
+            style: TextStyle(
+                color: mineColor(m),
+                fontSize: WaslFont.body,
+                height: 1.4,
+                fontStyle: FontStyle.italic)),
+      ),
+    );
+  }
+
+  /// لون نص الترجمة حسب صاحب الفقاعة
+  Color mineColor(Map<String, dynamic> m) =>
+      m['sender_id'] == _me ? _ink.secondary : context.textSecondary;
+
+  // ---------- المرحلة 5: الترجمة الفورية والردود الذكية والتفريغ ----------
+  static const _secure = FlutterSecureStorage();
+
+  Future<void> _loadAutoTranslatePref() async {
+    try {
+      final v = await _secure.read(
+          key: '$_autoTranslateKeyPrefix${widget.conversationId}');
+      if (!mounted || v == null) return;
+      setState(() => _autoTranslate = v == '1');
+    } catch (_) {}
+  }
+
+  Future<void> _toggleAutoTranslate() async {
+    if (!_autoTranslate && !_translateConfirming) {
+      // موافقة صريحة مرة واحدة: الترجمة ترسل نص الرسائل إلى Gemini
+      _translateConfirming = true;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('تشغيل الترجمة الفورية'),
+          content: const Text(
+              'ستُترجم الرسائل النصية الواردة تلقائياً ويظهر المترجم تحت الأصل. '
+              'للترجمة، يُرسل نص الرسائل الواردة إلى خادم وصل ثم إلى Google Gemini. '
+              'هذا النص لن يكون مشفّراً بين الطرفين أثناء الترجمة، والترجمة تُحفظ في جهازك لهذه الجلسة فقط. تتابع؟',
+              style: TextStyle(height: 1.6)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('تشغيل')),
+          ],
+        ),
+      );
+      _translateConfirming = false;
+      if (ok != true || !mounted) return;
+    }
+    final next = !_autoTranslate;
+    setState(() => _autoTranslate = next);
+    try {
+      await _secure.write(
+          key: '$_autoTranslateKeyPrefix${widget.conversationId}',
+          value: next ? '1' : '0');
+    } catch (_) {}
+    if (next) _snack('الترجمة الفورية تعمل — ستظهر الترجمة تحت الرسائل الواردة');
+  }
+
+  /// يترجم رسالة واردة في الخلفية (بعد فك تشفيرها محلياً)
+  Future<void> _translateIncoming(Map<String, dynamic> m) async {
+    final id = m['id'] as String;
+    if (_translating.contains(id) || _translations.containsKey(id)) return;
+    final plain = _textOf(m);
+    if (plain == null || plain.trim().isEmpty) return; // لم يُفك بعد
+    if (E2eService.isEncrypted(plain)) return;
+    _translating.add(id);
+    final target = LocalAiService.isMostlyArabic(plain) ? 'en' : 'ar';
+    try {
+      final t = await AiService.translate(plain, target);
+      if (mounted && t.trim().isNotEmpty) {
+        setState(() => _translations[id] = t);
+      }
+    } catch (_) {
+      // بلا شبكة: تظهر الرسالة الأصلية وحدها
+    } finally {
+      _translating.remove(id);
+    }
+  }
+
+  /// جدولة ترجمة الرسائل الواردة الجديدة (تُستدعى بعد بناء القائمة)
+  void _scheduleTranslate(List<Map<String, dynamic>> msgs) {
+    if (!_autoTranslate) return;
+    for (final m in msgs) {
+      if (m['deleted_at'] != null) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      if (m['sender_id'] == _me) continue;
+      final id = m['id'] as String;
+      if (_translations.containsKey(id) || _translating.contains(id)) continue;
+      unawaited(_translateIncoming(m));
+    }
+  }
+
+  // ---------- الترجمة إلى لغات أخرى (المرحلة 14 أ — 1.3.0) ----------
+  /// منتقي اللغة السحابية: الإنجليزية والفرنسية والتركية والأردية والعربية —
+  /// نفس مسار الخادم (Gemini) بموافقة المستخدم القائمة على الترجمة السحابية.
+  Future<String?> _pickLanguage(String text) async {
+    final script = LocalTranslateService.detectScript(text);
+    final suggested = script == 'ar' ? 'en' : 'ar';
+    return showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('ترجمة إلى…'),
+        children: [
+          for (final e in const <(String, String, bool)>[
+            ('en', 'الإنجليزية', false),
+            ('fr', 'الفرنسية', true),
+            ('tr', 'التركية', true),
+            ('ur', 'الأردية', true),
+            ('ar', 'العربية', false),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(c, e.$1),
+              child: Row(children: [
+                Text(e.$2,
+                    style: TextStyle(
+                        fontWeight: e.$1 == suggested
+                            ? FontWeight.w800
+                            : FontWeight.w400)),
+                if (e.$1 == suggested)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(start: WaslSpace.sm),
+                    child: Text('— مقترحة (كشف الكتابة على جهازك)',
+                        style: TextStyle(
+                            fontSize: WaslFont.small, color: context.textTertiary)),
+                  ),
+                if (e.$3)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(start: WaslSpace.sm),
+                    child: Text('(جديدة — تتطلب تحديث دالة الخادم)',
+                        style: TextStyle(
+                            fontSize: WaslFont.caption, color: context.textTertiary)),
+                  ),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// ترجمة رسالة إلى اللغة المختارة مع حارس صادق: إن عاد الرد بلغة لا تطابق
+  /// الطلب (خادم لم يُحدَّث بعد) تعلن الواجهة ذلك بدل عرض ترجمة خاطئة بصمت.
+  Future<void> _translateToOtherLanguage(String messageId, String text) async {
+    final target = await _pickLanguage(text);
+    if (target == null || !mounted) return;
+    if (target == 'ar' || target == 'en') {
+      _showAiResult('الترجمة', AiService.translate(text, target));
+      return;
+    }
+    _translating.add(messageId);
+    try {
+      final t = await AiService.translate(text, target);
+      if (!mounted) return;
+      if (!LocalTranslateService.resultMatchesTarget(t, target)) {
+        _snack('الخادم لم يُحدَّث لهذه اللغة بعد — يلزم نشر تحديث دالة ai '
+            '(مذكور في دفتر المهام). الترجمة إلى العربية والإنجليزية تعمل كالعادة');
+        return;
+      }
+      setState(() => _translations[messageId] = '🌐 $target: $t');
+    } catch (_) {
+      if (mounted) _snack('تعذرت الترجمة السحابية الآن — تحقق من الاتصال');
+    } finally {
+      _translating.remove(messageId);
+    }
+  }
+
+  // ---------- الملخص اليومي المحلي (المرحلة 9 أ — 0.22.0) ----------
+  /// يُستدعى بعد بناء القائمة مرة واحدة في الفتح: يقرأ ملخص اليوم من المخزن
+  /// الآمن، وإن لم يوجد يبنى من رسائل اليوم المفكوكة ويُخزن — صمت تام عند أي فشل.
+  Future<void> _ensureDailySummary(List<Map<String, dynamic>> all) async {
+    if (_dailyTried || widget.isSaved || all.isEmpty) return;
+    final now = DateTime.now();
+    final dayStart = DateTime(now.year, now.month, now.day);
+    // لا يُخزَّن ملخص ناقص: ننتظر اكتمال فك نصوص اليوم (تُعاد المحاولة بالبناء التالي)
+    for (final m in all.reversed) {
+      final created =
+          DateTime.tryParse((m['created_at'] ?? '') as String)?.toLocal();
+      if (created == null || created.isBefore(dayStart)) continue;
+      if (m['deleted_at'] != null) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      final raw = (m['content'] ?? '') as String;
+      if (E2eService.isEncrypted(raw) && !_plain.containsKey(raw)) return;
+    }
+    _dailyTried = true;
+    try {
+      if (await _dailyStore.load(widget.conversationId, now) != null) return;
+      final text = _buildDailySummaryFrom(all);
+      if (text != null) await _dailyStore.save(widget.conversationId, text, now);
+    } catch (_) {
+      // الفشل يهبط: القائمة تعمل والملخص الفوري في قائمة وصل AI يعمل على أي حال
+    }
+  }
+
+  /// بناء ملخص اليوم من رسائل اليوم المفكوكة — null إن لم توجد رسائل اليوم
+  String? _buildDailySummaryFrom(List<Map<String, dynamic>> all) {
+    final now = DateTime.now();
+    final dayStart = DateTime(now.year, now.month, now.day);
+    final lines = <DailyLine>[];
+    for (final m in all.reversed) {
+      final created =
+          DateTime.tryParse((m['created_at'] ?? '') as String)?.toLocal();
+      if (created == null || created.isBefore(dayStart)) continue;
+      if (m['deleted_at'] != null) continue;
+      final who = m['sender_id'] == _me ? 'أنت' : (_names[m['sender_id']] ?? 'عضو');
+      final type = (m['type'] ?? 'text') as String;
+      if (type == 'image' || type == 'voice' || type == 'video' || type == 'file') {
+        lines.add(DailyLine(who: who, text: '[وسائط]', isMedia: true));
+        continue;
+      }
+      final plain = _textOf(m);
+      if (plain == null || plain.trim().isEmpty) continue;
+      lines.add(DailyLine(who: who, text: plain));
+    }
+    return DailySummaryService.build(lines, now);
+  }
+
+  /// ملخص اليوم للعرض من قائمة وصل AI: المخزن أولاً ثم البناء فوراً
+  Future<String> _dailySummary() async {
+    final now = DateTime.now();
+    final stored = await _dailyStore.load(widget.conversationId, now);
+    if (stored != null) return stored;
+    final text = _buildDailySummaryFrom(_allMsgs);
+    if (text != null) {
+      unawaited(_dailyStore.save(widget.conversationId, text, now));
+      return text;
+    }
+    return 'لا توجد رسائل اليوم بعد — الملخص يُبنى تلقائياً مع أول رسالة.';
+  }
+
+  // ---------- الملخص الأسبوعي المحلي (المرحلة 14 أ — 1.3.0) ----------
+  /// بناء ملخص الأسبوع (نافذة متدحرجة 7 أيام) من الرسائل المفكوكة — null
+  /// إن لم توجد رسائل نصية داخل النافذة — بلا أي شبكة كالملخص اليومي.
+  String? _buildWeeklySummaryFrom(List<Map<String, dynamic>> all) {
+    final now = DateTime.now();
+    final weekStart = now.subtract(const Duration(days: 7));
+    final lines = <WeeklyLine>[];
+    for (final m in all) {
+      final created =
+          DateTime.tryParse((m['created_at'] ?? '') as String)?.toLocal();
+      if (created == null || created.isBefore(weekStart) || created.isAfter(now)) {
+        continue;
+      }
+      if (m['deleted_at'] != null) continue;
+      final who = m['sender_id'] == _me ? 'أنت' : (_names[m['sender_id']] ?? 'عضو');
+      final type = (m['type'] ?? 'text') as String;
+      if (type == 'image' || type == 'voice' || type == 'video' || type == 'file') {
+        lines.add(WeeklyLine(who: who, text: '[وسائط]', createdAt: created, isMedia: true));
+        continue;
+      }
+      final plain = _textOf(m);
+      if (plain == null || plain.trim().isEmpty) continue;
+      lines.add(WeeklyLine(who: who, text: plain, createdAt: created));
+    }
+    return WeeklySummaryService.build(lines, now);
+  }
+
+  /// ملخص الأسبوع للعرض من قائمة وصل AI: المخزن أولاً ثم البناء فوراً.
+  Future<String> _weeklySummary() async {
+    final now = DateTime.now();
+    final stored = await _weeklyStore.load(widget.conversationId, now);
+    if (stored != null) return stored;
+    final text = _buildWeeklySummaryFrom(_allMsgs);
+    if (text != null) {
+      unawaited(_weeklyStore.save(widget.conversationId, text, now));
+      return text;
+    }
+    return 'لا توجد رسائل نصية كافية هذا الأسبوع بعد — الملخص يُبنى من رسائلك المفكوكة على جهازك.';
+  }
+
+  // ---------- الصياغة بأسلوبك (المرحلة 9 ب — 0.23.0) ----------
+  /// آخر 200 رد أرسلتها هنا — المفكوك النصي حصراً، والتعلم كله محلي
+  StyleProfile? _myStyle() {
+    final mine = <String>[];
+    for (final m in _allMsgs) {
+      if (m['sender_id'] != _me) continue;
+      if (m['deleted_at'] != null || (m['type'] ?? 'text') != 'text') continue;
+      final t = _textOf(m);
+      if (t == null || t.trim().isEmpty) continue;
+      mine.add(t);
+      if (mine.length >= StyleAssistService.learnLimit) break;
+    }
+    if (mine.length < 5) return null;
+    return StyleAssistService.learn(mine);
+  }
+
+  /// ورقة الصياغة: 3 صيغ مرتبة حسب نبرتك + الإفصاح الحرفي
+  void _showStyleSheet() {
+    final profile = _myStyle();
+    final drafts = StyleAssistService.drafts(_text.text, profile: profile);
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: context.surfaceAlt,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(WaslSpace.sm, 0, WaslSpace.sm, WaslSpace.md),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const ListTile(
+              leading: Icon(Icons.edit_note_rounded, color: WaslColors.violet),
+              title: Text('صياغة بأسلوبك',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+            for (final d in drafts)
+              ListTile(
+                leading: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: context.glass,
+                    borderRadius: BorderRadius.circular(WaslRadius.sm),
+                  ),
+                  child: Center(
+                    child: Text(d.label,
+                        style: TextStyle(
+                            fontSize: WaslFont.small,
+                            fontWeight: FontWeight.w800,
+                            color: d.label == 'رسمي'
+                                ? WaslColors.indigo
+                                : d.label == 'ودي'
+                                    ? WaslColors.teal
+                                    : WaslColors.violet)),
+                  ),
+                ),
+                title: Text(d.text, style: const TextStyle(height: 1.4)),
+                subtitle: d.hint.isEmpty
+                    ? const Text('اقتراح بداية — عدّله كما تحب')
+                    : null,
+                trailing: const Icon(Icons.arrow_downward_rounded, size: 18),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() => _text.text = d.text);
+                },
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(WaslSpace.lg, WaslSpace.xs, WaslSpace.lg, WaslSpace.xs),
+              child: Text(StyleAssistService.disclosure,
+                  style: TextStyle(
+                      color: context.textFaint, fontSize: WaslFont.caption, height: 1.4)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ---------- التذكيرات الذكية (المرحلة 9 ب — 0.23.0) ----------
+  /// يُستدعى بعد بناء القائمة: مسح الوارد المفكوك لكشف المواعيد (محلي حصراً)
+  void _scanPromises(List<Map<String, dynamic>> all) {
+    if (!widget.canPost || widget.isSaved || widget.isChannel) return;
+    final incoming = <(String, String)>[];
+    for (final m in all) {
+      if (m['deleted_at'] != null) continue;
+      if (m['sender_id'] == _me) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      final t = _textOf(m);
+      if (t == null || E2eService.isEncrypted(t)) continue;
+      incoming.add((m['id'] as String, t));
+    }
+    final found = PromiseReminderService.scan(
+        incoming, DateTime.now(),
+        dismissed: _dismissedPromises);
+    if (found.length != _promises.length ||
+        (found.isNotEmpty && found.first.messageId != (_promises.isNotEmpty ? _promises.first.messageId : null))) {
+      if (mounted) setState(() => _promises = found);
+    }
+  }
+
+  /// استبعاد اقتراح تذكير — محفوظ محلياً حتى لا يعود نفس الاقتراح
+  Future<void> _dismissPromise(DetectedPromise p) async {
+    setState(() => _promises = _promises.where((x) => x.messageId != p.messageId).toList());
+    _dismissedPromises.add(p.messageId);
+    try {
+      await _secure.write(
+          key: 'wasl_promise_dismissed_${widget.conversationId}',
+          value: _dismissedPromises.take(50).join(','));
+    } catch (_) {}
+  }
+
+  /// تذكير محلي بنقرة: جدولة إشعار محلي في وقت الموعد المفهوم
+  Future<void> _schedulePromise(DetectedPromise p) async {
+    final fireAt = PromiseReminderService.resolveDate(p, DateTime.now());
+    if (fireAt == null) {
+      _snack('تعذّر تحديد وقت دقيق من الرسالة — لا جدولة مصطنعة');
+      await _dismissPromise(p);
+      return;
+    }
+    final err = await PushService.scheduleLocalReminder(
+      title: 'تذكير من وصل — ${widget.title}',
+      body: 'الموعد: ${p.describe()} — من رسالة: «${p.text.length > 60 ? '${p.text.substring(0, 60)}…' : p.text}»',
+      fireAt: fireAt,
+    );
+    if (!mounted) return;
+    _snack(err ?? 'فُعّل التذكير المحلي: ${p.describe()}');
+    if (err == null) await _dismissPromise(p);
+  }
+
+  /// بطاقة اقتراح التذكير فوق المحرر
+  Widget? _promiseCard() {
+    if (_promises.isEmpty) return null;
+    final p = _promises.first;
+    return Material(
+      color: WaslColors.teal.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, WaslSpace.sm),
+        child: Row(children: [
+          const Icon(Icons.alarm_add_rounded, size: 18, color: WaslColors.teal),
+          const SizedBox(width: WaslSpace.sm),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('يبدو أن هناك موعداً: ${p.describe()}',
+                  style: const TextStyle(fontSize: WaslFont.meta, fontWeight: FontWeight.w600)),
+              Text(PromiseReminderService.disclosure,
+                  style: TextStyle(
+                      color: context.textFaint, fontSize: WaslFont.caption, height: 1.3)),
+            ]),
+          ),
+          TextButton(
+              onPressed: () => _schedulePromise(p),
+              child: const Text('تذكير')),
+          IconButton(
+              tooltip: 'تجاهل',
+              icon: const Icon(Icons.close_rounded, size: 16),
+              onPressed: () => _dismissPromise(p)),
+        ]),
+      ),
+    );
+  }
+
+  /// تفريغ رسالة صوتية نصاً: موافقة صريحة ثم إرسال الصوت لـGemini عبر خادم وصل
+  Future<void> _transcribeVoice(Map<String, dynamic> m) async {
+    final id = m['id'] as String;
+    final cached = _transcripts[id];
+    if (cached != null) {
+      _showAiResult('تفريغ الرسالة الصوتية', Future.value(cached));
+      return;
+    }
+    if (_transcribing.contains(id)) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('تفريغ الرسالة الصوتية نصاً'),
+        content: const Text(
+            'سيُرسل الصوت إلى خادم وصل ثم إلى Google Gemini لتفريغه نصياً. '
+            'الصوت لن يُخزَّن ولا يُسجَّل، والتفريغ يظهر لك وحدك. تتابع؟',
+            style: TextStyle(height: 1.6)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('فرّغ')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    _transcribing.add(id);
+    _showAiResult('تفريغ الرسالة الصوتية', () async {
+      try {
+        final bytes = await _mediaBytes(m);
+        if (bytes == null) throw Exception('no audio');
+        final t = await AiService.transcribe(
+          bytes,
+          mime: kIsWeb ? 'audio/webm' : 'audio/mp4',
+        );
+        _transcripts[id] = t;
+        return t;
+      } finally {
+        _transcribing.remove(id);
+      }
+    }());
+  }
+
+  /// ورقة «وصل AI» لهذه المحادثة: ملخص محلي فوري أو ملخص سحابي بالموافقة
+  void _showAiMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: context.surfaceAlt,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(WaslSpace.sm, 0, WaslSpace.sm, WaslSpace.md),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const ListTile(
+              dense: true,
+              title: Row(children: [
+                Text('وصل AI', style: TextStyle(fontWeight: FontWeight.w800)),
+                SizedBox(width: WaslSpace.sm),
+                DevBadge(),
+              ]),
+            ),
+            ListTile(
+              leading: const Icon(Icons.question_answer_rounded, color: WaslColors.teal),
+              title: const Text('اسأل وصل — من أرشيفك'),
+              subtitle: const Text(
+                  'يجيب من رسائلك المفكوكة على جهازك حصراً — بلا شبكة ولا ادعاء'),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const AskWaslScreen()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_today_rounded, color: WaslColors.indigo),
+              title: const Text('ملخص اليوم'),
+              subtitle: const Text(
+                  'يُبنى عند أول فتح في اليوم ويُخزن على جهازك — بلا أي شبكة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('ملخص اليوم — على جهازك', _dailySummary());
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.date_range_rounded, color: WaslColors.indigo),
+              title: const Text('ملخص الأسبوع'),
+              subtitle: const Text(
+                  'نافذة متدحرجة 7 أيام — يُبنى ويُخزن على جهازك — بلا أي شبكة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('ملخص الأسبوع — على جهازك', _weeklySummary());
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.bolt_rounded, color: WaslColors.teal),
+              title: const Text('ملخص محلي فوري'),
+              subtitle: const Text('على جهازك — لا يغادر أي شيء، بلا موافقة ولا شبكة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('ملخص محلي (على جهازك)', _localSummary());
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_awesome, color: WaslColors.violet),
+              title: const Text('ملخص سحابي أعمق'),
+              subtitle: const Text('بموافقة صريحة — يمر عبر خادم وصل إلى Gemini'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _confirmSummarize();
+              },
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// الملخص المحلي: يجلب آخر 80 رسالة، يفك تشفيرها على الجهاز، ويلخّص محلياً
+  Future<String> _localSummary() async {
+    final rows = await supabase
+        .from('messages')
+        .select('id, content, type, deleted_at, profiles(display_name, username)')
+        .eq('conversation_id', widget.conversationId)
+        .order('created_at', ascending: false)
+        .limit(80);
+    final msgs = rows.reversed.toList();
+    final lines = <String>[];
+    for (final item in msgs) {
+      final m = item;
+      final p = m['profiles'] as Map<String, dynamic>?;
+      final who = (p?['display_name'] ?? p?['username'] ?? '؟') as String;
+      final type = m['type'] ?? 'text';
+      if (m['deleted_at'] != null) continue;
+      String what;
+      if (type == 'image') {
+        what = '[صورة]';
+      } else if (type == 'voice') {
+        what = '[رسالة صوتية]';
+      } else if (type == 'video') {
+        what = '[فيديو]';
+      } else if (type == 'file') {
+        what = '[ملف]';
+      } else {
+        final raw = (m['content'] ?? '') as String;
+        if (E2eService.isEncrypted(raw)) {
+          if (!_e2e) continue;
+          final plain = _plain[raw] ?? await _decrypt(raw);
+          if (plain == null) continue;
+          what = plain;
+        } else {
+          what = raw;
+        }
+      }
+      lines.add('$who: $what');
+    }
+    if (lines.isEmpty) return 'لا توجد رسائل لتلخيصها بعد.';
+    return LocalAiService.summarizeLines(lines);
+  }
+
+  /// تحديث الردود الذكية من آخر رسالة وردت نصاً (تُستدعى بعد بناء القائمة)
+  void _refreshSmartReplies(List<Map<String, dynamic>> newestFirst) {
+    if (!widget.canPost || widget.isSaved || widget.isChannel) {
+      if (_smartReplies.isNotEmpty || _repliesFor != null) {
+        _smartReplies = const [];
+        _repliesFor = null;
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    Map<String, dynamic>? last;
+    for (final m in newestFirst) {
+      if (m['deleted_at'] != null) continue;
+      if ((m['type'] ?? 'text') != 'text') continue;
+      last = m;
+      break;
+    }
+    if (last == null || last['sender_id'] == _me) {
+      if (_smartReplies.isNotEmpty || _repliesFor != null) {
+        _smartReplies = const [];
+        _repliesFor = null;
+        if (mounted) setState(() {});
+      }
+      return;
+    }
+    final id = last['id'] as String;
+    if (_repliesFor == id) return; // محسوبة من الرسالة نفسها
+    final text = _textOf(last);
+    if (text == null || E2eService.isEncrypted(text)) return; // لم يُفك بعد
+    _repliesFor = id;
+    final replies = LocalAiService.smartReplies(text);
+    if (mounted) setState(() => _smartReplies = replies);
+  }
+
+  // ---------- وصل AI ----------
+  /// التلخيص بعد E2E: التطبيق يجلب آخر 80 رسالة، يفك تشفيرها محلياً، ويرسل الأسطر للدالة
+  Future<String> _summarize() async {
+    final rows = await supabase
+        .from('messages')
+        .select('id, content, type, deleted_at, profiles(display_name, username)')
+        .eq('conversation_id', widget.conversationId)
+        .order('created_at', ascending: false)
+        .limit(80);
+    final msgs = rows.reversed.toList();
+    final lines = <String>[];
+    for (final item in msgs) {
+      final m = item;
+      final p = m['profiles'] as Map<String, dynamic>?;
+      final who = (p?['display_name'] ?? p?['username'] ?? '؟') as String;
+      final type = m['type'] ?? 'text';
+      if (m['deleted_at'] != null) continue;
+      String what;
+      if (type == 'image') {
+        what = '[صورة]';
+      } else if (type == 'voice') {
+        what = '[رسالة صوتية]';
+      } else if (type == 'video') {
+        what = '[فيديو]';
+      } else if (type == 'file') {
+        what = '[ملف]';
+      } else {
+        final raw = (m['content'] ?? '') as String;
+        if (E2eService.isEncrypted(raw)) {
+          if (!_e2e) continue;
+          final plain = _plain[raw] ?? await _decrypt(raw);
+          if (plain == null) continue;
+          what = plain;
+        } else {
+          what = raw;
+        }
+      }
+      lines.add('$who: $what');
+    }
+    if (lines.isEmpty) return 'لا توجد رسائل لتلخيصها بعد.';
+    return AiService.summarizeLines(lines);
+  }
+
+  void _showAiResult(String title, Future<String> job) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(WaslRadius.xl))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(WaslSpace.xl),
+          child: FutureBuilder<String>(
+            future: job,
+            builder: (ctx, s) {
+              final text = s.hasError
+                  ? 'تعذّر الوصول للمساعد الآن، حاول بعد قليل.'
+                  : s.data;
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.auto_awesome, color: WaslColors.violet),
+                      const SizedBox(width: WaslSpace.sm),
+                      Text(title, style: const TextStyle(fontSize: WaslFont.titleLarge, fontWeight: FontWeight.w800)),
+                      const Spacer(),
+                      if (text != null)
+                        IconButton(
+                          tooltip: 'نسخ نص الرسالة',
+                          icon: const Icon(Icons.copy_rounded),
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: text));
+                            Navigator.pop(ctx);
+                            _snack('تم النسخ');
+                          },
+                        ),
+                    ]),
+                    const SizedBox(height: WaslSpace.md),
+                    if (text == null)
+                      const Padding(
+                        padding: EdgeInsets.all(WaslSpace.xxl),
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else
+                      Flexible(
+                        child: SingleChildScrollView(
+                          child: SelectableText(text,
+                              style: const TextStyle(fontSize: WaslFont.title, height: 1.6)),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- الرد / التعديل / الحذف / التفاعل ----------
+
+  String _previewOf(Map<String, dynamic> m) {
+    if (m['deleted_at'] != null) return 'حُذفت هذه الرسالة';
+    final once = m['view_once'] == true ? ' (عرض مرة واحدة)' : '';
+    switch (m['type'] as String? ?? 'text') {
+      case 'image':
+        return '📷 صورة$once';
+      case 'voice':
+        return '🎤 رسالة صوتية';
+      case 'video':
+        return '🎬 فيديو$once';
+      case 'file':
+        return '📎 ${(_metaOf(m)?['name'] as String?) ?? 'ملف'}';
+      default:
+        final t = _textOf(m) ?? '🔒 رسالة مشفرة';
+        return t.length > 120 ? '${t.substring(0, 120)}…' : t;
+    }
+  }
+
+  String _senderName(String? id) {
+    if (id == _me) return 'أنت';
+    return _names[id] ?? (widget.isGroup ? '' : _title);
+  }
+
+  bool _canEdit(Map<String, dynamic> m) {
+    if (m['sender_id'] != _me || m['deleted_at'] != null) return false;
+    if ((m['type'] ?? 'text') != 'text') return false;
+    final created = DateTime.parse(m['created_at'] as String);
+    return DateTime.now().toUtc().difference(created.toUtc()).inHours < 48;
+  }
+
+  Future<void> _react(Map<String, dynamic> m, String emoji) async {
+    final raw = _reactions[m['id']]?[_me];
+    final mine = raw == null ? null : _emojiOf(raw);
+    try {
+      // الإزالة: نص فارغ. الإضافة: في المحادثات المشفرة يُشفَّر الإيموجي بمفتاح المحادثة
+      String out = '';
+      if (mine != emoji) {
+        if (_e2e) {
+          final key = await _convKey();
+          if (key == null) {
+            _snack('انتظر جاهزية مفاتيح التشفير ثم أعد المحاولة');
+            return;
+          }
+          out = await E2eService.encryptText(key, widget.conversationId, emoji);
+          _emojiPlain[out] = emoji; // عرض فوري وتبديل صحيح قبل وصول البث
+        } else {
+          out = emoji;
+        }
+      }
+      await supabase.rpc('react_message', params: {'p_id': m['id'], 'p_emoji': out});
+    } catch (_) {
+      _snack('تعذّر إرسال التفاعل');
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('حذف للجميع؟'),
+        content: const Text('ستُحذف الرسالة عند كل أعضاء المحادثة.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: WaslColors.danger),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('حذف')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      // ج5: ملصق الفيديو ملف ثانٍ — يُحذف معه (لصاحبه فقط، كسياسة التخزين)
+      final thumb = m['type'] == 'video' && m['sender_id'] == _me
+          ? VideoPoster.fromMeta(_metaOf(m), conversationId: widget.conversationId).thumbPath
+          : null;
+      final media = await supabase.rpc('delete_message', params: {'p_id': m['id']});
+      if (media is String && media.isNotEmpty) unawaited(MediaService.remove(media));
+      if (thumb != null) unawaited(MediaService.remove(thumb));
+      if (mounted && _replyTo?['id'] == m['id']) setState(() => _replyTo = null);
+    } catch (_) {
+      _snack('تعذّر حذف الرسالة');
+    }
+  }
+
+  /// ورقة إحصاءات القناة (المشرفون): المتابعون والإجمالي والمتوسط
+  /// وآخر 30 منشوراً بعدّادات مشاهدتها
+  Future<void> _showChannelStats() async {
+    List<Map<String, dynamic>> rows;
+    try {
+      rows = await ChannelStatsService.stats(widget.conversationId);
+    } catch (e) {
+      _snack(e.toString().contains('admins only')
+          ? 'إحصاءات القناة لمشرفيها فقط'
+          : 'تعذّر تحميل الإحصاءات (تأكد من تشغيل ترحيل 025)');
+      return;
+    }
+    if (!mounted || rows.isEmpty) return;
+    final subs = (rows.first['subscribers'] as num?)?.toInt() ?? 0;
+    final total = (rows.first['total_views'] as num?)?.toInt() ?? 0;
+    final avg = (rows.first['avg_views'] as num?) ?? 0;
+    final posts = rows.where((r) => r['post_id'] != null).toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(WaslRadius.xl))),
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.72,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.all(WaslSpace.lg),
+              child: Column(children: [
+                Text('إحصاءات ${widget.title}',
+                    style: const TextStyle(
+                        fontSize: WaslFont.titleLarge, fontWeight: FontWeight.w800)),
+                const SizedBox(height: WaslSpace.md),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                  _statTile(ctx, Icons.people_outline,
+                      ChannelStatsService.formatCount(subs), 'متابع'),
+                  _statTile(ctx, Icons.remove_red_eye_outlined,
+                      ChannelStatsService.formatCount(total), 'إجمالي المشاهدات'),
+                  _statTile(ctx, Icons.insights_outlined,
+                      ChannelStatsService.formatCount(avg), 'متوسط المنشور'),
+                ]),
+              ]),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: posts.isEmpty
+                  ? Center(
+                      child: Text('لا منشورات بعد',
+                          style: TextStyle(color: ctx.textTertiary)))
+                  : ListView.builder(
+                      padding: const EdgeInsets.only(bottom: WaslSpace.xxl),
+                      itemCount: posts.length,
+                      itemBuilder: (_, i) {
+                        final p = posts[i];
+                        final v = (p['views'] as num?)?.toInt() ?? 0;
+                        final type = p['post_type'] as String? ?? 'text';
+                        var text = switch (type) {
+                          'image' => '📷 صورة',
+                          'voice' => '🎤 رسالة صوتية',
+                          'video' => '🎬 فيديو',
+                          'file' => '📎 ملف',
+                          _ => (p['post_content'] as String?) ?? '',
+                        };
+                        if (text.length > 90) text = '${text.substring(0, 90)}…';
+                        return ListTile(
+                          dense: true,
+                          title: Text(text,
+                              maxLines: 2, overflow: TextOverflow.ellipsis),
+                          subtitle: Text(shortTime(p['post_created_at'] as String?),
+                              style: TextStyle(
+                                  color: ctx.textFaint, fontSize: WaslFont.caption)),
+                          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.remove_red_eye_outlined,
+                                size: 15, color: ctx.textTertiary),
+                            const SizedBox(width: WaslSpace.xs),
+                            Text(ChannelStatsService.formatCount(v),
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                          ]),
+                        );
+                      },
+                    ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _statTile(BuildContext ctx, IconData icon, String value, String label) =>
+      Column(children: [
+        Icon(icon, size: 20, color: WaslColors.teal),
+        const SizedBox(height: WaslSpace.xs),
+        Text(value,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: WaslFont.bodyLarge)),
+        Text(label, style: TextStyle(fontSize: WaslFont.small, color: ctx.textTertiary)),
+      ]);
+
+  Future<void> _forward(Map<String, dynamic> m) async {
+    List<Map<String, dynamic>> chats;
+    try {
+      chats = List<Map<String, dynamic>>.from(await supabase.rpc('my_chats') as List)
+          .where((c) => c['conversation_id'] != widget.conversationId)
+          .toList();
+      // هدف «رسائلي المحفوظة» أعلى القائمة دائماً (المرحلة 4)
+      try {
+        final savedId = await SavedService.id();
+        if (savedId != widget.conversationId) {
+          final last = await SavedService.lastMessage();
+          chats = [
+            {
+              'conversation_id': savedId,
+              'is_group': true,
+              'title': SavedService.title,
+              'avatar_url': null,
+              'last_type': last?['type'],
+            },
+            ...chats,
+          ];
+        }
+      } catch (_) {
+        // بلا ترحيل 025: التوجيه للمحفوظة غير متاح والبقية تعمل
+      }
+    } catch (_) {
+      _snack('تعذّر تحميل المحادثات');
+      return;
+    }
+    if (!mounted) return;
+    final target = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.surfaceAlt,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(WaslRadius.xl))),
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.6,
+          child: Column(children: [
+            const Padding(
+              padding: EdgeInsets.all(WaslSpace.lg),
+              child: Text('إعادة توجيه إلى…',
+                  style: TextStyle(fontSize: WaslFont.titleLarge, fontWeight: FontWeight.w800)),
+            ),
+            Expanded(
+              child: chats.isEmpty
+                  ? const Center(child: Text('لا توجد محادثات أخرى'))
+                  : ListView(children: [
+                      for (final c in chats)
+                        ListTile(
+                          leading: UserAvatar(
+                            name: (c['title'] ?? '') as String,
+                            url: c['avatar_url'] as String?,
+                            radius: 22,
+                            color: c['is_group'] == true ? WaslColors.teal : WaslColors.indigo,
+                            icon: c['is_group'] == true ? Icons.groups_2 : null,
+                          ),
+                          title: Text((c['title'] ?? '') as String),
+                          onTap: () => Navigator.pop(ctx, c),
+                        ),
+                    ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (target == null || !mounted) return;
+    setState(() => _uploading = true);
+    final type = m['type'] as String? ?? 'text';
+    bool ok;
+    if (type == 'text') {
+      ok = await ForwardService.send(target: target, type: 'text', text: _textOf(m));
+    } else if (type == 'location') {
+      // توجيه الموقع يحافظ على نوعه — نفس مسار النص المشفر
+      ok = await ForwardService.send(
+          target: target, type: 'location', text: _textOf(m));
+    } else {
+      final bytes = await _mediaBytes(m);
+      ok = bytes != null &&
+          await ForwardService.send(
+              target: target,
+              type: type,
+              bytes: bytes,
+              text: (type == 'file' || type == 'video') ? _textOf(m) : null,
+              durationMs: m['duration_ms'] as int?);
+    }
+    if (mounted) setState(() => _uploading = false);
+    _snack(ok
+        ? 'أُرسلت إلى ${target['title']}'
+        : 'تعذّرت إعادة التوجيه (قد لا يكون التشفير جاهزاً في المحادثة الأخرى)');
+  }
+
+  void _startEdit(Map<String, dynamic> m) {
+    final t = _textOf(m);
+    if (t == null) return;
+    setState(() {
+      _editing = m;
+      _replyTo = null;
+      _text.text = t;
+      _text.selection = TextSelection.collapsed(offset: t.length);
+    });
+  }
+
+  /// قائمة «المزيد» بورقة سفلية مرتبة: أهم أربع أدوات كأزرار، ثم أقسام
+  void _showMoreSheet() {
+    final speaking = _ttsBusy || VoiceReadService.speaking.value;
+    void go(BuildContext ctx, VoidCallback f) {
+      Navigator.pop(ctx);
+      f();
+    }
+
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        SheetActionGrid([
+          SheetAction(Icons.search_rounded, 'بحث', WaslColors.indigo,
+              () => go(ctx, () {
+                    setState(() => _searching = true);
+                    _loadSearchCorpus();
+                  })),
+          SheetAction(Icons.auto_awesome, 'وصل AI', WaslColors.violet,
+              () => go(ctx, _showAiMenu)),
+          SheetAction(Icons.photo_library_rounded, 'الوسائط', WaslColors.teal,
+              () => go(ctx, _openMediaGallery)),
+          SheetAction(_starredOnly ? Icons.star_rounded : Icons.star_outline_rounded,
+              _starredOnly ? 'كل الرسائل' : 'المميزة', WaslColors.warning,
+              () => go(ctx, () => setState(() => _starredOnly = !_starredOnly)),
+              active: _starredOnly),
+        ]),
+        const SheetSectionLabel('هذه المحادثة'),
+        if (_isPrivateGroup)
+          SheetTile(
+              icon: Icons.info_outline_rounded,
+              color: WaslColors.indigo,
+              title: 'معلومات المجموعة',
+              onTap: () => go(ctx, _openGroupInfo)),
+        if (_isPrivateGroup)
+          SheetTile(
+              icon: Icons.spatial_audio_off_rounded,
+              color: WaslColors.teal,
+              title: 'غرفة صوت',
+              subtitle: 'دردشة صوتية مفتوحة لأعضاء المجموعة',
+              onTap: () => go(ctx, _openVoiceRoom)),
+        if (widget.isChannel && widget.canPost)
+          SheetTile(
+              icon: Icons.query_stats_rounded,
+              color: WaslColors.teal,
+              title: 'إحصاءات القناة',
+              onTap: () => go(ctx, _showChannelStats)),
+        if (_showSafety)
+          SheetTile(
+              icon: _verified ? Icons.verified_user_rounded : Icons.verified_user_outlined,
+              color: _verified ? WaslColors.verified : WaslColors.teal,
+              title: 'رمز الأمان',
+              subtitle: _verified ? 'موثّق ✓' : 'تأكّد أنك تكلّم الشخص الصحيح',
+              onTap: () => go(ctx, _showSafetyNumber)),
+        SheetTile(
+            icon: Icons.palette_rounded,
+            color: WaslColors.violet,
+            title: 'استوديو المحادثة',
+            subtitle: 'خلفية وألوان وخط هذه المحادثة',
+            onTap: () => go(ctx, _openChatStudio)),
+        if (!kIsWeb)
+          SheetTile(
+              icon: Icons.music_note_rounded,
+              color: WaslColors.teal,
+              title: 'نغمة الإشعار',
+              subtitle: 'نغمة خاصة لهذه المحادثة',
+              onTap: () => go(ctx,
+                  () => showTonePicker(context, conversationId: widget.conversationId))),
+        SheetTile(
+            icon: speaking ? Icons.stop_circle_outlined : Icons.volume_up_rounded,
+            color: WaslColors.indigo,
+            title: speaking ? 'إيقاف القراءة' : 'اقرأ آخر الرسائل بصوت',
+            onTap: () => go(ctx, _toggleSpeak)),
+        const SheetSectionLabel('الخصوصية'),
+        if (!widget.isChannel)
+          SheetTile(
+              icon: Icons.timer_outlined,
+              color: WaslColors.violet,
+              title: 'الرسائل المختفية',
+              trailing: Text(disappearLabel(_disappear),
+                  style: TextStyle(color: context.textFaint)),
+              onTap: () => go(ctx, _changeDisappearing)),
+        if (!widget.isChannel)
+          SheetTile(
+              icon: Icons.translate_rounded,
+              color: WaslColors.teal,
+              title: 'الترجمة الفورية',
+              trailing: Icon(
+                  _autoTranslate ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                  size: 36,
+                  color: _autoTranslate ? WaslColors.teal : context.textFaint),
+              onTap: () => go(ctx, _toggleAutoTranslate)),
+        SheetTile(
+            icon: Icons.screenshot_monitor_outlined,
+            color: WaslColors.indigo,
+            title: 'منع لقطات الشاشة',
+            subtitle: 'تشغيل أو إيقاف لهذه المحادثة',
+            onTap: () => go(ctx, _toggleNoScreenshots)),
+        if (!widget.isChannel && !widget.isBot) ...[
+          const SheetSectionLabel('الحماية'),
+          SheetTile(
+              icon: Icons.shield_rounded,
+              danger: true,
+              title: 'بلاغ عاجل',
+              subtitle: 'ابتزاز، تهديد، تحرّش أو انتحال — يصل للمدير مباشرة وبسرّية',
+              onTap: () => go(ctx, () => _openShieldReport(null))),
+        ],
+        const SheetSectionLabel('أخرى'),
+        SheetTile(
+            icon: Icons.ios_share_rounded,
+            color: WaslColors.teal,
+            title: 'تصدير المحادثة نصاً',
+            onTap: () => go(ctx, _exportConversation)),
+        SheetTile(
+            icon: Icons.delete_sweep_outlined,
+            danger: true,
+            title: 'مسح المحادثة عندي',
+            onTap: () => go(ctx, _clearConversation)),
+      ],
+    );
+  }
+
+  void _messageActions(Map<String, dynamic> m) {
+    if (m['deleted_at'] != null) return;
+    final isText = (m['type'] ?? 'text') == 'text';
+    final isVoice = (m['type'] ?? '') == 'voice';
+    final text = isText ? _textOf(m) : null;
+    if (isText && text == null) {
+      _snack('جارٍ فك التشفير… حاول بعد لحظة');
+      return;
+    }
+    final arabic = text != null && RegExp(r'[\u0600-\u06FF]').hasMatch(text);
+    final mine = m['sender_id'] == _me;
+    final myReaction = _emojiOf(_reactions[m['id']]?[_me] ?? '');
+    final starred = _stars.contains(m['id']);
+    showWaslSheet<void>(
+      context,
+      children: (ctx) => [
+        // صف التفاعلات داخل كبسولة زجاجية
+        Container(
+          margin: const EdgeInsets.fromLTRB(WaslSpace.lg, WaslSpace.sm, WaslSpace.lg, WaslSpace.xs),
+          padding: const EdgeInsets.symmetric(horizontal: WaslSpace.sm, vertical: WaslSpace.xs),
+          decoration: BoxDecoration(
+            color: context.glass,
+            borderRadius: BorderRadius.circular(40),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              for (final e in _quickEmojis)
+                InkWell(
+                  borderRadius: BorderRadius.circular(WaslRadius.xl),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _react(m, e);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.all(WaslSpace.sm),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: myReaction == e
+                          ? WaslColors.teal.withValues(alpha: 0.30)
+                          : null,
+                    ),
+                    child: Text(e, style: const TextStyle(fontSize: WaslFont.displayLarge)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        SheetActionGrid([
+          if (widget.canPost)
+            SheetAction(Icons.reply_rounded, 'رد', WaslColors.teal, () {
+              Navigator.pop(ctx);
+              setState(() {
+                _replyTo = m;
+                _editing = null;
+              });
+            }),
+          if (text != null)
+            SheetAction(Icons.copy_rounded, 'نسخ', WaslColors.indigo, () {
+              Clipboard.setData(ClipboardData(text: text));
+              Navigator.pop(ctx);
+              _snack('تم النسخ');
+            }),
+          SheetAction(starred ? Icons.star_rounded : Icons.star_outline_rounded,
+              starred ? 'إلغاء النجمة' : 'نجمة', WaslColors.warning, () {
+            Navigator.pop(ctx);
+            _toggleStar(m);
+          }, active: starred),
+          if (_e2e && !widget.isChannel && m['view_once'] != true && m['protected'] != true)
+            SheetAction(Icons.shortcut_rounded, 'توجيه', WaslColors.violet, () {
+              Navigator.pop(ctx);
+              _forward(m);
+            }),
+          if (_canEdit(m))
+            SheetAction(Icons.edit_rounded, 'تعديل', WaslColors.info, () {
+              Navigator.pop(ctx);
+              _startEdit(m);
+            }),
+        ]),
+        // 2.1.0: رحلة الرسالة + من قرأها + تفضيل الشريط المدمج
+        if (m['sender_id'] == _me)
+          SheetTile(
+            icon: Icons.timeline_rounded,
+            color: WaslColors.teal,
+            title: 'رحلة الرسالة',
+            onTap: () {
+              Navigator.pop(ctx);
+              _showJourney(m);
+            },
+          ),
+        if (widget.isGroup)
+          SheetTile(
+            icon: Icons.how_to_reg_outlined,
+            color: WaslColors.violet,
+            title: 'من قرأها؟',
+            onTap: () {
+              Navigator.pop(ctx);
+              _showGroupReads(m);
+            },
+          ),
+        SheetTile(
+          icon: Icons.build_circle_outlined,
+          color: context.textTertiary,
+          title: _barAlways
+              ? 'شريط الإجراءات: أسفل كل الرسائل (اضغط للتبديل)'
+              : 'شريط الإجراءات: عند تحديد الرسالة (اضغط للتبديل)',
+          onTap: () {
+            Navigator.pop(ctx);
+            setState(() => _barAlways = !_barAlways);
+            _secure.write(
+                key: 'wasl_bar_always_${widget.conversationId}',
+                value: _barAlways ? '1' : '0');
+          },
+        ),
+        // 2.2.0: تفاصيل الرسالة للوارد + حذف لدي للجميع
+        if (m['sender_id'] != _me)
+          SheetTile(
+            icon: Icons.info_outline_rounded,
+            color: WaslColors.indigo,
+            title: 'تفاصيل الرسالة',
+            onTap: () {
+              Navigator.pop(ctx);
+              _showDetails(m);
+            },
+          ),
+        SheetTile(
+          icon: Icons.visibility_off_outlined,
+          color: WaslColors.danger,
+          title: 'حذف لدي (إخفاء)',
+          onTap: () {
+            Navigator.pop(ctx);
+            _hideForMe(m);
+          },
+        ),
+        if (text != null)
+          SheetTile(
+            icon: Icons.translate_rounded,
+            color: WaslColors.violet,
+            title: arabic ? 'ترجمة إلى الإنجليزية' : 'ترجمة إلى العربية',
+            trailing: TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _translateOptions(m, text);
+              },
+              child: const Text('خيارات'),
+            ),
+            onTap: () {
+              Navigator.pop(ctx);
+              _showAiResult('الترجمة', AiService.translate(text, arabic ? 'en' : 'ar'));
+            },
+          ),
+        if (isVoice)
+          SheetTile(
+            icon: Icons.graphic_eq_rounded,
+            color: WaslColors.teal,
+            title: _transcripts.containsKey(m['id'])
+                ? 'عرض النص المكتوب'
+                : 'حوّل الصوت إلى نص',
+            subtitle: 'تجريبي — يُرسل المقطع لـ Gemini بعد موافقتك',
+            onTap: () {
+              Navigator.pop(ctx);
+              _transcribeVoice(m);
+            },
+          ),
+        if (isVoice && _transcripts[m['id']]?.isNotEmpty == true)
+          SheetTile(
+            icon: Icons.translate_rounded,
+            color: WaslColors.violet,
+            title: 'ترجمة النص',
+            onTap: () {
+              Navigator.pop(ctx);
+              final t = _transcripts[m['id']]!;
+              final isAr = RegExp(r'[\u0600-\u06FF]').hasMatch(t);
+              _showAiResult('ترجمة النص', AiService.translate(t, isAr ? 'en' : 'ar'));
+            },
+          ),
+        const SizedBox(height: WaslSpace.xs),
+        if (mine)
+          SheetTile(
+            icon: Icons.delete_outline_rounded,
+            danger: true,
+            title: 'حذف للجميع',
+            onTap: () {
+              Navigator.pop(ctx);
+              _delete(m);
+            },
+          ),
+        if (!mine)
+          SheetTile(
+            icon: Icons.flag_outlined,
+            danger: true,
+            title: 'الإبلاغ عن الرسالة',
+            onTap: () {
+              Navigator.pop(ctx);
+              showReportDialog(context,
+                  targetUser: m['sender_id'] as String?,
+                  messageId: m['id'] as String?,
+                  targetName: _senderName(m['sender_id'] as String?));
+            },
+          ),
+        if (!mine && !widget.isChannel)
+          SheetTile(
+            icon: Icons.shield_rounded,
+            danger: true,
+            title: 'بلاغ عاجل عن المرسل',
+            subtitle: 'Wasl Shield — ابتزاز أو تهديد أو تحرّش',
+            onTap: () {
+              Navigator.pop(ctx);
+              _openShieldReport(m['sender_id'] as String?);
+            },
+          ),
+      ],
+    );
+  }
+
+  /// خيارات الترجمة الثلاث في ورقة مستقلة بدل ازدحام ورقة الرسالة
+  void _translateOptions(Map<String, dynamic> m, String text) {
+    final toEn = LocalTranslateService.detectScript(text) == 'ar';
+    showWaslSheet<void>(
+      context,
+      title: 'ترجمة الرسالة',
+      titleIcon: Icons.translate_rounded,
+      children: (ctx) => [
+        SheetTile(
+          icon: Icons.auto_awesome,
+          color: WaslColors.violet,
+          title: toEn ? 'إلى الإنجليزية' : 'إلى العربية',
+          subtitle: 'الأدق — عبر وصل AI',
+          onTap: () {
+            Navigator.pop(ctx);
+            _showAiResult('الترجمة', AiService.translate(text, toEn ? 'en' : 'ar'));
+          },
+        ),
+        SheetTile(
+          icon: Icons.language_rounded,
+          color: WaslColors.indigo,
+          title: 'إلى لغة أخرى…',
+          subtitle: 'اختر من قائمة اللغات',
+          onTap: () {
+            Navigator.pop(ctx);
+            _translateToOtherLanguage(m['id'] as String, text);
+          },
+        ),
+        SheetTile(
+          icon: Icons.wifi_off_rounded,
+          color: WaslColors.teal,
+          title: 'ترجمة سريعة بلا إنترنت',
+          subtitle: 'على جهازك — للكلمات الأساسية فقط',
+          onTap: () {
+            Navigator.pop(ctx);
+            final r = LocalTranslateService.translate(text, toEnglish: toEn);
+            _snack(r.low
+                ? 'الترجمة بلا إنترنت غطّت ${(r.coverage * 100).round()}% فقط — جرّب «الأدق»'
+                : 'ترجمة بلا إنترنت (${(r.coverage * 100).round()}%)');
+            setState(() => _translations[m['id'] as String] = '🔁 ${r.text}');
+          },
+        ),
+      ],
+    );
+  }
+
+  /// اقتباس الرسالة المردود عليها داخل الفقاعة
+  Widget _quote(String replyId, bool mine) {
+    final r = _byId[replyId];
+    return Container(
+      margin: const EdgeInsets.only(bottom: WaslSpace.sm),
+      padding: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, WaslSpace.sm),
+      decoration: BoxDecoration(
+        color: mine ? _ink.quoteFill : context.glass,
+        borderRadius: BorderRadius.circular(WaslRadius.md),
+        border: BorderDirectional(
+            start: BorderSide(
+                color: mine ? _ink.secondary : context.senderColor(r?['sender_id'] as String?),
+                width: 3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (r != null && _senderName(r['sender_id'] as String?).isNotEmpty)
+          Text(_senderName(r['sender_id'] as String?),
+              style: TextStyle(
+                  // على فقاعتي (تدرج داكن) أبيض؛ وعلى فقاعة الطرف لون المرسل المقروء
+                  color: mine ? _ink.primary : context.senderColor(r['sender_id'] as String?),
+                  fontSize: WaslFont.small,
+                  fontWeight: FontWeight.w800)),
+        Text(r == null ? 'رسالة غير متاحة' : _previewOf(r),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                color: mine ? _ink.secondary : context.textSecondary, fontSize: WaslFont.meta)),
+      ]),
+    );
+  }
+
+  /// شارات التفاعلات تحت الفقاعة
+  Widget? _reactionChips(Map<String, dynamic> m) {
+    final r = _reactions[m['id']];
+    if (r == null || r.isEmpty) return null;
+    final counts = <String, int>{};
+    for (final raw in r.values) {
+      final e = _emojiOf(raw);
+      if (e.isEmpty) continue; // لم يُفك بعد
+      counts[e] = (counts[e] ?? 0) + 1;
+    }
+    final mineEmoji = _emojiOf(r[_me] ?? '');
+    return Padding(
+      padding: const EdgeInsets.only(top: WaslSpace.xxs, bottom: WaslSpace.xxs),
+      child: Wrap(spacing: WaslSpace.xs, children: [
+        for (final e in counts.entries)
+          GestureDetector(
+            onTap: () => _react(m, e.key),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: WaslSpace.sm, vertical: WaslSpace.xxs),
+              decoration: BoxDecoration(
+                color: mineEmoji == e.key
+                    ? WaslColors.teal.withValues(alpha: 0.35)
+                    : context.surfaceAlt,
+                borderRadius: BorderRadius.circular(WaslRadius.md),
+                border: Border.all(color: context.hairline),
+              ),
+              child: Text(e.value > 1 ? '${e.key} ${e.value}' : e.key,
+                  style: const TextStyle(fontSize: WaslFont.meta)),
+            ),
+          ),
+      ]),
+    );
+  }
+
+  /// شريط الرد/التعديل فوق حقل الكتابة
+  Widget? _composeBanner() {
+    final m = _editing ?? _replyTo;
+    if (m == null) return null;
+    final editing = _editing != null;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, 0),
+      // 2.5.0: حشوة اتجاهية — كانت fromLTRB(12,8,4,8) فتنعكس خطأً في العربية
+      padding: const EdgeInsetsDirectional.fromSTEB(WaslSpace.md, WaslSpace.sm, WaslSpace.xs, WaslSpace.sm),
+      decoration: BoxDecoration(
+        color: context.glass,
+        borderRadius: BorderRadius.circular(WaslRadius.md),
+        border: BorderDirectional(start: BorderSide(color: context.accentText, width: 3)),
+      ),
+      child: Row(children: [
+        Icon(editing ? Icons.edit_outlined : Icons.reply_rounded, color: context.accentText),
+        const SizedBox(width: WaslSpace.sm),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(editing ? 'تعديل الرسالة' : 'رد على ${_senderName(m['sender_id'] as String?)}',
+                style: TextStyle(
+                    color: context.accentText, fontSize: WaslFont.small, fontWeight: FontWeight.w800)),
+            Text(_previewOf(m),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: context.textSecondary, fontSize: WaslFont.meta)),
+          ]),
+        ),
+        IconButton(
+          tooltip: 'إلغاء التعديل والرد',
+          icon: const Icon(Icons.close_rounded),
+          onPressed: () => setState(() {
+            if (editing) _text.clear();
+            _editing = null;
+            _replyTo = null;
+          }),
+        ),
+      ]),
+    );
+  }
+
+  // ---------- معلومات المجموعة ----------
+  bool get _isPrivateGroup =>
+      widget.isGroup && !widget.isChannel && widget.encrypted && !widget.isSaved;
+
+  Future<void> _openGroupInfo() async {
+    final r = await Navigator.push<GroupInfoResult>(
+      context,
+      MaterialPageRoute(
+          builder: (_) => GroupInfoScreen(conversationId: widget.conversationId, title: _title)),
+    );
+    if (!mounted || r == null) return;
+    if (r.left) {
+      Navigator.pop(context);
+      return;
+    }
+    if (r.title != null && r.title != _title) setState(() => _title = r.title!);
+    _loadMeta(); // اسم/صورة المجموعة قد تكون تغيّرت
+    _loadMembers();
+  }
+
+  void _openChatStudio() => Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) =>
+          ChatStudioScreen(conversationId: widget.conversationId, title: _title)));
+
+  /// شريط الكتابة حسب «استوديو التطبيق»
+  InputDecoration _composerDecoration(String hint) {
+    final s = AppStudioService.style.value;
+    switch (s.input) {
+      case StudioInput.rounded:
+        return InputDecoration(hintText: hint);
+      case StudioInput.pill:
+        return InputDecoration(
+          hintText: hint,
+          contentPadding: const EdgeInsets.symmetric(horizontal: WaslSpace.xl, vertical: WaslSpace.md),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(WaslRadius.xxl), borderSide: BorderSide.none),
+        );
+      case StudioInput.outlined:
+        return InputDecoration(
+          hintText: hint,
+          filled: false,
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(s.r(18)),
+              borderSide: BorderSide(color: context.hairline)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(s.r(18)),
+              borderSide: BorderSide(color: context.hairline)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(s.r(18)),
+              borderSide: BorderSide(color: s.accentColor, width: 1.5)),
+        );
+      case StudioInput.minimal:
+        return InputDecoration(
+          hintText: hint,
+          filled: false,
+          border: UnderlineInputBorder(borderSide: BorderSide(color: context.hairline)),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: context.hairline)),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasText = _text.text.trim().isNotEmpty;
+    return Scaffold(
+      appBar: _searching
+          ? AppBar(
+              leading: IconButton(
+                tooltip: 'إنهاء البحث داخل المحادثة',
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => setState(() {
+                  _searching = false;
+                  _searchKind = 'all';
+                  _searchCorpus = const [];
+                  _searchCtrl.clear();
+                }),
+              ),
+              title: TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                    hintText: 'ابحث في المحادثة…', border: InputBorder.none, filled: false),
+              ),
+              // رقائق مرشحات الأنواع (2.4.0): نصوص/صور/فيديو/ملفات/صوتيات/
+              // مواقع/روابط/أرقام — وتصفية النوع بلا استعلام مسموحة
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(46),
+                child: SizedBox(
+                  height: 46,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: WaslSpace.sm),
+                    child: Row(children: [
+                      for (final (k, label, icon) in _searchKinds)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: WaslSpace.xs),
+                          child: ChoiceChip(
+                            visualDensity: VisualDensity.compact,
+                            avatar: Icon(icon,
+                                size: 16,
+                                color: _searchKind == k
+                                    ? Colors.white
+                                    : context.iconStd),
+                            label: Text(label,
+                                style: TextStyle(
+                                    fontSize: WaslFont.meta,
+                                    color: _searchKind == k
+                                        ? Colors.white
+                                        : context.textSecondary)),
+                            selected: _searchKind == k,
+                            selectedColor: WaslColors.indigo,
+                            backgroundColor: context.glass,
+                            onSelected: (_) => setState(() => _searchKind = k),
+                          ),
+                        ),
+                    ]),
+                  ),
+                ),
+              ),
+            )
+          : AppBar(
+        titleSpacing: 0,
+        title: GestureDetector(
+         onTap: _isPrivateGroup
+             ? _openGroupInfo
+             : (!widget.isGroup && widget.otherId != null ? _openContact : null),
+         behavior: HitTestBehavior.opaque,
+         child: Row(children: [
+          Hero(
+            tag: 'chat-avatar-${widget.conversationId}',
+            child: (widget.isGroup && !widget.isChannel && (_groupAvatarPath ?? '').isNotEmpty)
+                ? GroupAvatar(
+                    conversationId: widget.conversationId,
+                    path: _groupAvatarPath,
+                    name: _title,
+                    radius: 20,
+                  )
+                : AnimatedContainer(
+                    // النبض الحي (2.1.0): هالة تركوازية ناعمة عند اتصال الطرف
+                    duration: const Duration(milliseconds: 500),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: (!widget.isGroup &&
+                              PrivacyService.liveFx.value &&
+                              PresenceService.isOnline(widget.otherId))
+                          ? [
+                              BoxShadow(
+                                  color:
+                                      WaslColors.teal.withValues(alpha: 0.5),
+                                  blurRadius: 18,
+                                  spreadRadius: 2)
+                            ]
+                          : const [],
+                    ),
+                    child: UserAvatar(
+                    name: _title,
+                    url: _otherAvatar,
+                    radius: 20,
+                    color: widget.isGroup ? WaslColors.teal : WaslColors.indigo,
+                    icon: widget.isGroup ? (widget.isChannel ? Icons.campaign : Icons.groups_2) : null,
+                  ),
+                  ),
+          ),
+          const SizedBox(width: WaslSpace.md),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(
+                  child: Text(_title,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: WaslFont.titleLarge)),
+                ),
+                if (_otherOfficial) ...[
+                  const SizedBox(width: WaslSpace.xs),
+                  const OfficialBadge(size: 16),
+                ] else if (widget.officialVerified || _otherVerified) ...[
+                  const SizedBox(width: WaslSpace.xs),
+                  const VerifiedBadge(size: 15),
+                ],
+                if (_showSafety && _verified) ...[
+                  const SizedBox(width: WaslSpace.xs),
+                  const Icon(Icons.verified_user_rounded,
+                      size: 15, color: WaslColors.verified),
+                ],
+              ]),
+              if (_statusLine() != null)
+                Text(_statusLine()!,
+                    style: TextStyle(
+                        fontSize: WaslFont.small,
+                        fontWeight: _typing.isNotEmpty ? FontWeight.w600 : FontWeight.w500,
+                        color: _typing.isNotEmpty ? context.accentText : context.textTertiary)),
+            ]),
+          ),
+         ]),
+        ),
+        actions: [
+          // شريط علوي مرتّب (2.0): زران رئيسيان على الأكثر كي يظهر الاسم كاملاً،
+          // والباقي في قائمة «المزيد»
+          if (_isPrivateGroup)
+            IconButton(
+              tooltip: 'مكالمة جماعية',
+              onPressed: () => startGroupCall(context,
+                  conversationId: widget.conversationId, title: _title),
+              icon: const Icon(Icons.call_outlined),
+            ),
+          if (!widget.isGroup && widget.otherId != null && !widget.isBot) ...[
+            IconButton(
+              tooltip: 'مكالمة مرئية',
+              onPressed: () => _startCall(CallKind.video),
+              icon: const Icon(Icons.videocam_outlined),
+            ),
+            IconButton(
+              tooltip: 'مكالمة صوتية',
+              onPressed: () => _startCall(CallKind.voice),
+              icon: const Icon(Icons.call_outlined),
+            ),
+          ],
+          if (widget.isChannel)
+            IconButton(
+              tooltip: 'إشعارات القناة: ${ChannelBellService.label(_bell)}',
+              onPressed: _showBellDialog,
+              icon: Icon(
+                _bell == 'mute'
+                    ? Icons.notifications_off_outlined
+                    : _bell == 'pinned'
+                        ? Icons.push_pin_outlined
+                        : Icons.notifications_active_outlined,
+                color: _bell == 'all'
+                    ? null
+                    : _bell == 'pinned'
+                        ? WaslColors.teal
+                        : context.textFaint,
+              ),
+            ),
+          IconButton(
+            tooltip: 'المزيد',
+            icon: const Icon(Icons.more_vert_rounded),
+            onPressed: _showMoreSheet,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (widget.isBot)
+            Material(
+              color: context.glass,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: WaslSpace.lg, vertical: WaslSpace.sm),
+                child: Row(children: [
+                  const Icon(Icons.smart_toy_outlined, size: 16, color: WaslColors.violet),
+                  const SizedBox(width: WaslSpace.sm),
+                  Expanded(
+                    child: Text(
+                        'محادثة مع بوت — غير مشفرة طرف-لطرف، والبوت يقرأها عبر واجهته',
+                        style:
+                            TextStyle(fontSize: WaslFont.small, color: context.textTertiary)),
+                  ),
+                ]),
+              ),
+            ),
+          if (_disappear != null || _starredOnly)
+            Material(
+              color: context.glass,
+              child: InkWell(
+                onTap: _starredOnly
+                    ? () => setState(() => _starredOnly = false)
+                    : _changeDisappearing,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: WaslSpace.lg, vertical: WaslSpace.sm),
+                  child: Row(children: [
+                    Icon(_starredOnly ? Icons.star_rounded : Icons.timer_outlined,
+                        size: 18, color: _starredOnly ? WaslColors.warning : WaslColors.violet),
+                    const SizedBox(width: WaslSpace.sm),
+                    Expanded(
+                      child: Text(
+                          _starredOnly
+                              ? 'تعرض الرسائل المميزة بنجمة فقط. اضغط لعرض الكل.'
+                              : 'الرسائل الجديدة تختفي بعد ${disappearLabel(_disappear)}',
+                          style: const TextStyle(fontSize: WaslFont.meta)),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          if (_showSafety && E2eService.peerKeyChanged(widget.otherId!))
+            Material(
+              color: const Color(0x33FFC107),
+              child: InkWell(
+                onTap: _showSafetyNumber,
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: WaslSpace.lg, vertical: WaslSpace.md),
+                  child: Row(children: [
+                    Icon(Icons.warning_amber_rounded, color: WaslColors.warning),
+                    SizedBox(width: WaslSpace.md),
+                    Expanded(
+                        child: Text(
+                            'تغيّر رمز الأمان لهذا الشخص (ربما غيّر جواله). اضغط للتحقق.')),
+                  ]),
+                ),
+              ),
+            ),
+          Expanded(
+            // خلفية المحادثة المختارة (الإعدادات ← المظهر ← خلفية المحادثة)
+            // استوديو المحادثة: صورة/خلفية هذه المحادثة وحجم خطها
+            child: ChatBackground(
+              chat: _chatStyle.value,
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                    textScaler: TextScaler.linear(
+                        FontScaleService.scale.value * (_chatStyle.value.fontScale ?? 1.0))),
+                child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _stream,
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  // ج4: فقاعات هيكل متناوبة بدل الدائرة — تطابق تخطيط المحادثة
+                  return const WaslSkeletonChat();
+                }
+                final now = DateTime.now();
+                final all = snap.data!.reversed.where((m) {
+                  final e = m['expires_at'] as String?;
+                  if (e != null && !DateTime.parse(e).isAfter(now)) return false;
+                  // المسح الشخصي (0.20.0): الرسائل قبله مخفية عني حصراً
+                  final c = _clearedAt;
+                  if (c != null) {
+                    final t = DateTime.tryParse(m['created_at'] as String? ?? '');
+                    if (t != null && !t.isAfter(c)) return false;
+                  }
+                  return true;
+                }).toList();
+                _byId = {for (final m in all) m['id'] as String: m};
+                final q = _query;
+                // البحث العميق (2.4.0): المخزون الموسّع يغذي القائمة أثناء البحث
+                final pool = _searching ? _searchBase(all) : all;
+                if (_searching) _scheduleDecrypt(pool);
+                final base = _starredOnly
+                    ? pool.where((m) => _stars.contains(m['id'])).toList()
+                    : pool;
+                if (_starredOnly && base.isEmpty) {
+                  _scheduleDecrypt(all);
+                  return Center(
+                      child: Text('لا رسائل مميزة بنجمة هنا',
+                          style: TextStyle(color: context.textTertiary)));
+                }
+                final msgs = (!_searching || (q.isEmpty && _searchKind == 'all'))
+                    ? base
+                    : base.where((m) {
+                        if (m['deleted_at'] != null || !_kindMatch(m)) {
+                          return false;
+                        }
+                        if (q.isEmpty) return true; // تصفية نوع بلا استعلام
+                        // البحث الذكي (المرحلة 5) على النص القابل للبحث حسب
+                        // النوع: تطبيع عربي + تسامح أخطاء + مرادفات
+                        return SmartSearchService.matches(_searchTextOf(m) ?? '', q);
+                      }).toList();
+                if (_searching && (q.isNotEmpty || _searchKind != 'all') && msgs.isEmpty) {
+                  _scheduleDecrypt(all);
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(WaslSpace.xxl),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Text('لا نتائج', style: TextStyle(color: context.textTertiary)),
+                        const SizedBox(height: WaslSpace.sm),
+                        Text(SmartSearchService.capabilityHint,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: context.textFaint, fontSize: WaslFont.small)),
+                      ]),
+                    ),
+                  );
+                }
+                // حالة فارغة ودّية بدل شاشة سوداء (قناة أو محادثة بلا رسائل)
+                if (q.isEmpty && !_starredOnly && all.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(WaslSpace.xxxl),
+                      child: GlassEmptyState(
+                        icon: widget.isChannel
+                            ? Icons.campaign_outlined
+                            : Icons.waving_hand_outlined,
+                        title: widget.isChannel
+                            ? 'لا منشورات بعد'
+                            : 'لا رسائل بعد',
+                        subtitle: widget.isChannel
+                            ? (widget.canPost
+                                ? 'اكتب أول منشور ليصل لكل المتابعين'
+                                : 'ستظهر منشورات القناة هنا فور نشرها')
+                            : 'قل مرحباً وابدأ المحادثة',
+                      ),
+                    ),
+                  );
+                }
+                WidgetsBinding.instance.addPostFrameCallback((_) => _maybeMarkRead(all));
+                _trackChannelViews(all);
+                _scheduleDecrypt(all);
+                _scheduleTranslate(all);
+                // الإصلاح: الردود الذكية والتذكيرات تستدعي setState على
+                // الشاشة — لا يجوز ذلك داخل builder الستريم؛ تُؤجل لما بعد الإطار
+                _derivedFromStream.schedule(all);
+                unawaited(_ensureDailySummary(all));
+                // الألبوم المتعدد (0.20.0): القطع المتتالية بمعرّف واحد فقاعة واحدة
+                // 2.2.0: «حذف لدي» — المخفي يختفي من العرض فقط؛ تبقى
+                // البيانات كاملة للتأكيد والمقروء والرحلة كما هي
+                final visibleMsgs = msgs
+                    .where((r) => !_hiddenIds.contains(r['id'] as String?))
+                    .toList();
+                final items = AlbumService.group(visibleMsgs);
+                _allMsgs = all;
+                // 2.1.0: تأكيد وصول الوارد + تعلّم صدى رسائلي (للإيصالات)
+                _ackIncoming(all.where((r) => r['sender_id'] != _me).toList());
+                for (final r in all) {
+                  if (r['sender_id'] == _me) _echoSeen.add(r['id'] as String);
+                }
+                _maybeJumpToFocus(items);
+                _trackNewWhileAway(items);
+                // 2.2.0: النقر في الفراغ يغلق الشريط المحدد — لمسات الفقاعات
+                // والوسائط تسبق هذا المستمع في سباق الإيماءة فلا تتأثر وظائفها
+                return Stack(children: [
+                  GestureDetector(
+                  onTap: () {
+                    if (_selectedMsg != null) {
+                      setState(() => _selectedMsg = null);
+                    }
+                  },
+                  child: ScrollablePositionedList.builder(
+                  reverse: true,
+                  padding: const EdgeInsets.all(WaslSpace.md),
+                  itemCount: items.length,
+                  itemScrollController: _itemScroll,
+                  itemPositionsListener: _itemPositions,
+                  itemBuilder: (context, i) {
+                    final item = items[i];
+                    // 2.5.0: فاصل اليوم + تجميع المتتاليات من المرسل نفسه.
+                    // القائمة معكوسة: الأقدم (فوق) = i+1 والأحدث (تحت) = i-1
+                    final older = i + 1 < items.length ? items[i + 1].first : null;
+                    final newer = i > 0 ? items[i - 1].first : null;
+                    final dayChip = _dayChipFor(item.first, older);
+                    if (item.length > 1) {
+                      final album = _albumTile(item);
+                      return dayChip == null
+                          ? album
+                          : Column(mainAxisSize: MainAxisSize.min, children: [dayChip, album]);
+                    }
+                    final m = item.first;
+                    final mine = m['sender_id'] == _me;
+                    final sender = _names[m['sender_id']];
+                    final joinAbove = dayChip == null && _sameRun(older, m);
+                    final joinBelow = _sameRun(m, newer) &&
+                        _dayChipFor(newer!, m) == null;
+                    final replyId = m['reply_to'] as String?;
+                    final chips = _reactionChips(m);
+                    // حركة الدخول مرة واحدة لكل رسالة (المرحلة 5)
+                    final firstTime = _motionSeen.add(m['id'] as String);
+                    Widget bubble = GestureDetector(
+                       // 2.1.0: اللمسة تختار وتفتح الشريط المدمج — لا ضغط مطول
+                       onTap: () => _toggleSelect(m),
+                       onLongPress: () => _toggleSelect(m),
+                       child: Container(
+                        // المتتاليات تتلاصق (2px) والسلاسل تتباعد (10px)
+                        margin: EdgeInsets.only(
+                            top: joinAbove ? 1 : 5, bottom: joinBelow ? 1 : 5),
+                        padding: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, WaslSpace.sm),
+                        // سقف عرض مريح للقراءة — لا تتمدد الفقاعة على الشاشات
+                        // العريضة واللوحتين (كان 75% من عرض الشاشة كلها)
+                        constraints: BoxConstraints(
+                            maxWidth: math.min(
+                                MediaQuery.of(context).size.width * 0.78, 520)),
+                        decoration: _look
+                            .decoration(
+                                mine: mine,
+                                otherBase: context.bubbleOther,
+                                joinAbove: joinAbove,
+                                joinBelow: joinBelow)
+                            .copyWith(
+                          // الإبراز عند القفز (معرض الوسائط): إطار فاتح يذوب
+                          border: _highlightId == m['id']
+                              ? Border.all(color: Colors.tealAccent, width: 2.5)
+                              : null,
+                          boxShadow: _highlightId == m['id']
+                              ? [BoxShadow(color: Colors.tealAccent.withValues(alpha: 0.35), blurRadius: 18)]
+                              : null,
+                        ),
+                        // 2.5.0 (ج2/ج3): الوقت والعلامات في الحافة السفلية
+                        // الختامية — على السطر الأخير للنص إن اتسع، وإلا تحته
+                        child: BubbleFooterLayout(
+                          content: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // اسم المرسل أول السلسلة فقط وبلون ثابت لكل عضو (2.5.0)
+                            if (widget.isGroup && !mine && sender != null && !joinAbove)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: WaslSpace.xs),
+                                child: Text(sender,
+                                    style: TextStyle(
+                                        color: context.senderColor(
+                                            m['sender_id'] as String?),
+                                        fontSize: WaslFont.meta,
+                                        fontWeight: FontWeight.w800)),
+                              ),
+                            if (replyId != null && m['deleted_at'] == null)
+                              _quote(replyId, mine),
+                            _body(m),
+                            // الترجمة الفورية تحت الرسالة الواردة (المرحلة 5)
+                            if (_autoTranslate &&
+                                !mine &&
+                                m['deleted_at'] == null &&
+                                (m['type'] ?? 'text') == 'text')
+                              _translationLine(m),
+                            ?chips,
+                          ],
+                          ),
+                          footer: Padding(
+                            padding: const EdgeInsetsDirectional.only(
+                                top: WaslSpace.xxs, start: WaslSpace.sm),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              if (_stars.contains(m['id'])) ...[
+                                const Icon(Icons.star_rounded, size: 13, color: WaslColors.warning),
+                                const SizedBox(width: WaslSpace.xs),
+                              ],
+                              if (widget.isChannel) ...[
+                                Icon(Icons.remove_red_eye_outlined,
+                                    size: 12,
+                                    color: mine ? _ink.tertiary : context.textTertiary),
+                                const SizedBox(width: WaslSpace.xs),
+                                Text(ChannelStatsService.formatCount(_views[m['id']] ?? 0),
+                                    style: TextStyle(
+                                        color: mine ? _ink.secondary : context.textSecondary,
+                                        fontSize: WaslFont.caption)),
+                                const SizedBox(width: WaslSpace.xs),
+                              ],
+                              if (m['expires_at'] != null) ...[
+                                Icon(Icons.timer_outlined,
+                                    size: 12,
+                                    color: mine ? _ink.tertiary : context.textTertiary),
+                                const SizedBox(width: WaslSpace.xs),
+                              ],
+                              if (m['edited_at'] != null && m['deleted_at'] == null) ...[
+                                Text('معدّلة',
+                                    style: TextStyle(
+                                        color: mine ? _ink.tertiary : context.textTertiary,
+                                        fontSize: WaslFont.caption)),
+                                const SizedBox(width: WaslSpace.xs),
+                              ],
+                              Text(_time(m['created_at'] as String),
+                                  style: TextStyle(
+                                      color: mine ? _ink.secondary : context.textSecondary,
+                                      fontSize: WaslFont.caption)),
+                              if (mine) ...[const SizedBox(width: WaslSpace.xs), _ticks(m)],
+                            ]),
+                          ),
+                        ),
+                      ),
+                      );
+                    if (firstTime) {
+                      bubble = MotionBubble(child: bubble, mine: mine);
+                    }
+                    // 2.5.0 (ج2): السحب نحو الداخل يرد على الرسالة
+                    bubble = SwipeToReply(
+                      enabled: widget.canPost && m['deleted_at'] == null,
+                      onReply: () => setState(() {
+                        _replyTo = m;
+                        _editing = null;
+                      }),
+                      child: bubble,
+                    );
+                    // 2.1.0: الشريط المدمج — عند التحديد أو بوضع «أسفل الكل»
+                    final showBar = _barAlways || _selectedMsg == m['id'];
+                    final row = Align(
+                      alignment: mine
+                          ? AlignmentDirectional.centerEnd
+                          : AlignmentDirectional.centerStart,
+                      child: Column(
+                        crossAxisAlignment: mine
+                            ? CrossAxisAlignment.end
+                            : CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          bubble,
+                          if (showBar) _inlineBar(m),
+                        ],
+                      ),
+                    );
+                    return dayChip == null
+                        ? row
+                        : Column(mainAxisSize: MainAxisSize.min, children: [dayChip, row]);
+                  },
+                ),
+              ),
+                  // 2.5.0 (ج2): زر «إلى الأحدث» بعدد الجديد
+                  PositionedDirectional(
+                    end: WaslSpace.lg,
+                    bottom: WaslSpace.md,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _awayFromBottom,
+                      builder: (context, away, _) => ValueListenableBuilder<int>(
+                        valueListenable: _newWhileAway,
+                        builder: (context, n, _) => JumpToBottomButton(
+                          visible: away,
+                          unread: n,
+                          onPressed: _jumpToBottom,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // ج4: جلب الرسائل الأقدم للبحث العميق — فقاعتا هيكل أعلى
+                  // القائمة (فوق الأقدم) بدل دائرة، بلا إزاحة فهارس القفز
+                  if (_searching && _corpusLoading)
+                    PositionedDirectional(
+                      top: 0,
+                      start: 0,
+                      end: 0,
+                      child: IgnorePointer(
+                        child: Semantics(
+                          label: 'جارٍ جلب الرسائل الأقدم',
+                          child: ExcludeSemantics(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: WaslSpace.md, vertical: WaslSpace.xs),
+                              child: WaslShimmer(
+                                child: Column(mainAxisSize: MainAxisSize.min, children: const [
+                                  WaslSkeletonBubble(mine: false, width: 150),
+                                  WaslSkeletonBubble(mine: true, width: 110),
+                                ]),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ]);
+              },
+            ),
+              ),
+            ),
+          ),
+          if (_uploading) const LinearProgressIndicator(minHeight: 2),
+          if (widget.canPost && _composeBanner() != null) _composeBanner()!,
+          if (_iBlockedPeer)
+            _blockedBanner()
+          else if (_isMuted)
+            _mutedBanner()
+          else if (!widget.canPost)
+            SafeArea(
+              top: false,
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(WaslSpace.md, WaslSpace.sm, WaslSpace.md, WaslSpace.md),
+                padding: const EdgeInsets.all(WaslSpace.lg),
+                decoration: BoxDecoration(
+                  color: context.glass,
+                  borderRadius: BorderRadius.circular(WaslRadius.lg),
+                ),
+                child: Text('النشر هنا للمشرفين فقط',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.textTertiary)),
+              ),
+            )
+          else
+          SafeArea(
+            top: false,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              if (_promises.isNotEmpty) _promiseCard()!,
+              // 2.1.0: فقاعة الكتابة الحية + إشارة عودة الاتصال
+              _typingBubble(),
+              if (_returnFlash)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: WaslSpace.sm),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: WaslSpace.md, vertical: WaslSpace.xs),
+                      decoration: BoxDecoration(
+                        color: WaslColors.teal.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(WaslRadius.md),
+                        border: Border.all(
+                            color: WaslColors.teal.withValues(alpha: 0.4)),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.bolt_rounded, size: 14, color: WaslColors.teal),
+                        SizedBox(width: WaslSpace.sm),
+                        Text('عاد للاتصال الآن',
+                            style: TextStyle(
+                                fontSize: WaslFont.small, fontWeight: FontWeight.w700)),
+                      ]),
+                    ),
+                  ),
+                ),
+              // الردود الذكية المحلية (المرحلة 5) + شريحة الصياغة بأسلوبك (9 ب)
+              if (!_recording)
+                QuickReplyRow(
+                  replies: _smartReplies,
+                  onStyle: _showStyleSheet,
+                  onReply: (r) => setState(() {
+                    _text.text = r;
+                    _text.selection =
+                        TextSelection.fromPosition(TextPosition(offset: r.length));
+                  }),
+                ),
+              // المرحلة 13 أ (1.1.0): شريط الطابور الصادق — ما حُفظ على جهازك
+              // بانتظار الشبكة معروض بعدد وحقيقة إرسال آلي مرتّب، بلا ادعاء
+              ValueListenableBuilder<int>(
+                valueListenable: OfflineQueueService.count,
+                builder: (context, n, _) {
+                  if (n == 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(WaslSpace.sm, 0, WaslSpace.sm, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: WaslSpace.md, vertical: WaslSpace.sm),
+                      decoration: BoxDecoration(
+                        color: WaslColors.warning.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(WaslRadius.md),
+                        border: Border.all(
+                            color: WaslColors.warning.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(children: [
+                        ValueListenableBuilder<bool>(
+                          valueListenable: OfflineQueueService.draining,
+                          builder: (context, busy, _) => Icon(
+                            busy
+                                ? Icons.cloud_sync_rounded
+                                : Icons.cloud_off_rounded,
+                            size: 16,
+                            color: Colors.orange.shade700,
+                          ),
+                        ),
+                        const SizedBox(width: WaslSpace.sm),
+                        Expanded(
+                          child: ValueListenableBuilder<bool>(
+                            valueListenable: OfflineQueueService.draining,
+                            builder: (context, busy, _) => Text(
+                              busy
+                                  ? 'جارٍ إرسال $n محفوظة بالترتيب…'
+                                  : '$n رسالة محفوظة على جهازك بانتظار الشبكة — تُرسل تلقائياً عند عودته بالترتيب نفسه',
+                              style: TextStyle(
+                                  fontSize: WaslFont.small,
+                                  color: Colors.orange.shade700),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  );
+                },
+              ),
+              Padding(
+              padding: const EdgeInsets.fromLTRB(WaslSpace.sm, WaslSpace.sm, WaslSpace.sm, WaslSpace.md),
+              child: Row(children: [
+                if (!_recording)
+                  IconButton(
+                    tooltip: 'إرفاق — صور وملفات وألبوم',
+                    onPressed: _uploading ? null : _showAttachSheet,
+                    icon: const Icon(Icons.attach_file_rounded),
+                  ),
+                Expanded(
+                  child: _recording
+                      ? Container(
+                          height: 48,
+                          padding: const EdgeInsets.symmetric(horizontal: WaslSpace.lg),
+                          decoration: BoxDecoration(
+                            color: context.glass,
+                            borderRadius: BorderRadius.circular(WaslRadius.lg),
+                          ),
+                          child: Row(children: [
+                            const Icon(Icons.fiber_manual_record, color: WaslColors.danger, size: 14),
+                            const SizedBox(width: WaslSpace.sm),
+                            Text('جارٍ التسجيل ${_recLabel()}'),
+                            const Spacer(),
+                            Text('اترك للإرسال', style: TextStyle(color: context.textFaint)),
+                          ]),
+                        )
+                      : TextField(
+                          controller: _text,
+                          minLines: 1,
+                          maxLines: 5,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _sendText(),
+                          decoration: _composerDecoration(l10nT(
+                              'chats_type_message', LocaleService.lang.value)),
+                        ),
+                ),
+                const SizedBox(width: WaslSpace.sm),
+                // 2.5.0: تبديل سلس بين الإرسال والميكروفون (تكبير + تلاشٍ)
+                AnimatedSwitcher(
+                  duration: AppStudioService.motionOn ? WaslMotion.fast : Duration.zero,
+                  switchInCurve: WaslMotion.emphasized,
+                  transitionBuilder: (child, a) => ScaleTransition(
+                      scale: Tween<double>(begin: 0.6, end: 1).animate(a),
+                      child: FadeTransition(opacity: a, child: child)),
+                  child: hasText
+                    ? Container(
+                        key: const ValueKey('send'),
+                        width: WaslSize.minTap,
+                        height: WaslSize.minTap,
+                        decoration: BoxDecoration(
+                            shape: BoxShape.circle, gradient: WaslColors.gradient),
+                        child: IconButton(
+                          tooltip: 'إرسال الرسالة',
+                          onPressed: _sendText,
+                          icon: Icon(Icons.send_rounded, color: context.onAccent),
+                        ),
+                      )
+                    : Semantics(
+                        key: const ValueKey('mic'),
+                        button: true,
+                        label: _recording
+                            ? 'جارٍ التسجيل — اترك للإرسال'
+                            : 'رسالة صوتية — اضغط مطولاً للتسجيل',
+                        child: GestureDetector(
+                        onLongPressStart: (_) => _startRec(),
+                        onLongPressEnd: (_) => _stopRec(),
+                        onTap: () => _snack('اضغط مطولاً للتسجيل'),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: _recording ? 60 : 48,
+                          height: _recording ? 60 : 48,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: _recording ? null : WaslColors.gradient,
+                            color: _recording ? WaslColors.danger : null,
+                            boxShadow: _recording
+                                ? [
+                                    BoxShadow(
+                                        color: WaslColors.danger.withValues(alpha: 0.45),
+                                        blurRadius: 18,
+                                        spreadRadius: 2)
+                                  ]
+                                : null,
+                          ),
+                          child: Icon(Icons.mic_rounded,
+                              color: _recording ? Colors.white : context.onAccent),
+                        ),
+                      ),
+                      ),
+                ),
+              ]),
+            ),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ألوان المحتوى فوق فقاعتي — مشتقة من تباين لون الفقاعة المختار
+class _OwnInk {
+  const _OwnInk({
+    required this.primary,
+    required this.secondary,
+    required this.tertiary,
+    required this.readTick,
+    required this.quoteFill,
+  });
+  final Color primary;
+  final Color secondary;
+  final Color tertiary;
+  final Color readTick;
+  final Color quoteFill;
+}
