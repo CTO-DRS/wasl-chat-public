@@ -84,6 +84,8 @@ flutter:
     - assets/tones/
     # استوديو التطبيق (1.13.0): معاينات أيقونات المشغّل
     - assets/app_icons/
+    # عن المطوّر
+    - assets/developer/
 
 # نسخ بدون كود C أصلي (jni) لتسهيل البناء
 dependency_overrides:

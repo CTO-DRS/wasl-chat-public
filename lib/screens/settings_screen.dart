@@ -28,6 +28,7 @@ import '../widgets/common.dart';
 import '../widgets/wasl_sheet.dart';
 import 'admin_screen.dart';
 import 'shield_screen.dart';
+import 'about_developer_screen.dart';
 import 'beta_screen.dart';
 import 'backup_export_screen.dart';
 import 'e2e_key_screen.dart';
@@ -299,6 +300,9 @@ class SettingsScreen extends StatelessWidget {
                 'خلل أو فكرة — تصلنا مباشرة', () => const FeedbackScreen()),
             _nav(context, Icons.science_rounded, WaslColors.violet, 'انضم للمختبرين',
                 'جرّب الميزات قبل الجميع', () => const BetaScreen()),
+            _nav(context, Icons.person_rounded, WaslColors.indigo,
+                LocaleService.lang.value == 'ar' ? 'عن المطوّر' : 'About the developer',
+                'CTO: DRS', () => const AboutDeveloperScreen()),
             SheetTile(
               icon: Icons.system_update_alt_rounded,
               color: WaslColors.indigo,
