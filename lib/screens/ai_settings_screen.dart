@@ -9,7 +9,11 @@ import '../widgets/wasl_sheet.dart';
 /// API البديلة كتابة فقط ولا تُعاد قيمتها أبداً للعميل. دوال Edge تقرأ
 /// الجدول مباشرة بدور الخدمة مع ذاكرة مؤقتة قصيرة.
 class AiSettingsScreen extends StatefulWidget {
-  const AiSettingsScreen({super.key});
+  const AiSettingsScreen({super.key, this.previewData});
+
+  /// بيانات معاينة للعرض فقط (لقطة الشاشة/الاختبارات) — حين تُمرر لا يجري
+  /// أي اتصال بالخادم وتُملأ الحقول منها مباشرة.
+  final Map<String, dynamic>? previewData;
 
   @override
   State<AiSettingsScreen> createState() => _AiSettingsScreenState();
@@ -45,7 +49,21 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    final p = widget.previewData;
+    if (p != null) {
+      _provider = (p['provider'] ?? 'groq') as String;
+      _chatModel.text = (p['chat_model'] ?? '') as String;
+      _sttModel.text = (p['stt_model'] ?? '') as String;
+      _maxChars.text = '${p['max_input_chars'] ?? 8000}';
+      _hasGroqKey = p['has_groq_key_override'] == true;
+      _hasGeminiKey = p['has_gemini_key_override'] == true;
+      for (final k in _features.keys) {
+        _features[k] = p['feature_$k'] != false;
+      }
+      _loading = false;
+    } else {
+      _load();
+    }
   }
 
   @override
