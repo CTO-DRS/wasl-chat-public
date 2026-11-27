@@ -85,6 +85,7 @@ import 'media_gallery_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
 import '../services/live_location_service.dart';
+import '../services/missed_summary_service.dart';
 import '../widgets/location_card.dart';
 import 'voice_room_screen.dart';
 import '../widgets/wasl_sheet.dart';
@@ -833,6 +834,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     ..repeat();
   // 2.2.0: «حذف لدي» (إخفاء محلي) + قفل منع التنفيذ المزدوج للإجراءات
   Set<String> _hiddenIds = {};
+  bool _myReadCaptured = false;
+  DateTime? _myReadAtOnOpen;
   bool _barBusy = false;
 
   @override
@@ -958,7 +961,14 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       DateTime? peerRead;
       _partRows = rows;
       for (final r in rows) {
-        if (r['user_id'] == _me) continue;
+        if (r['user_id'] == _me) {
+          // أول قراءة عند الفتح (قبل أن يحدّثها فتح المحادثة): أساس «ما فاتني»
+          if (!_myReadCaptured) {
+            _myReadCaptured = true;
+            _myReadAtOnOpen = DateTime.tryParse('${r['last_read_at'] ?? ''}');
+          }
+          continue;
+        }
         if (r['last_read_at'] != null) {
           final t = DateTime.parse(r['last_read_at'] as String);
           if (!widget.isGroup && r['user_id'] == widget.otherId) peerRead = t;
@@ -3640,6 +3650,28 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     return DailySummaryService.build(lines, now);
   }
 
+  /// «ما فاتني»: رسائل الآخرين التي وصلت بعد آخر قراءة لك عند فتح المحادثة
+  Future<String> _missedSummary() async {
+    final since = _myReadAtOnOpen;
+    if (since == null) return 'لا توجد قراءة سابقة لمقارنتها بعد.';
+    final lines = <MissedLine>[];
+    for (final m in _allMsgs) {
+      if (m['sender_id'] == _me || m['deleted_at'] != null) continue;
+      final created = DateTime.tryParse('${m['created_at'] ?? ''}');
+      if (created == null || !created.isAfter(since)) continue;
+      final who = _names[m['sender_id']] ?? 'عضو';
+      final type = (m['type'] ?? 'text') as String;
+      if (type == 'image' || type == 'voice' || type == 'video' || type == 'file') {
+        lines.add(MissedLine(who: who, text: '[وسائط]', isMedia: true));
+        continue;
+      }
+      final plain = _textOf(m);
+      if (plain == null || plain.trim().isEmpty) continue;
+      lines.add(MissedLine(who: who, text: plain));
+    }
+    return MissedSummaryService.build(lines) ?? 'ما فاتك شيء، أنت على اطلاع بكل الرسائل.';
+  }
+
   /// ملخص اليوم للعرض من قائمة وصل AI: المخزن أولاً ثم البناء فوراً
   Future<String> _dailySummary() async {
     final now = DateTime.now();
@@ -3920,6 +3952,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                 Navigator.pop(ctx);
                 Navigator.push(context,
                     MaterialPageRoute(builder: (_) => const AskWaslScreen()));
+              },
+            ),
+            ListTile(
+              key: const ValueKey('ai-missed'),
+              leading: const Icon(Icons.mark_chat_unread_rounded, color: WaslColors.indigo),
+              title: const Text('ما فاتني'),
+              subtitle: const Text(
+                  'ملخص ما وصل منذ آخر قراءة لك — على جهازك بلا شبكة'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showAiResult('ما فاتني — على جهازك', _missedSummary());
               },
             ),
             ListTile(
