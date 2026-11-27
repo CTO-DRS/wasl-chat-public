@@ -2662,7 +2662,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   /// صورة واحدة (معرض أو كاميرا): تمر عبر محرر الصورة المحلي قبل الإرسال —
   /// «تخطي» في المحرر يعيد نفس البايتات الأصلية.
   Future<void> _pickImage(ImageSource source) async {
-    final x = await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 80);
+    final cfg = PrivacyService.imageUploadSettings;
+    final x = await _picker.pickImage(
+        source: source, maxWidth: cfg.maxWidth, imageQuality: cfg.quality);
     if (x == null) return;
     var bytes = await x.readAsBytes();
     final edited = await ImageEditorScreen.open(context, bytes, fileName: x.name);

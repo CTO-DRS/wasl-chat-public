@@ -26,6 +26,13 @@ class PrivacyService {
   /// بنقرة. الافتراضي مطفأ؛ محلي على جهازك فقط.
   static final dataSaver = ValueNotifier<bool>(false);
 
+  /// إعدادات ضغط الصورة قبل الرفع: توفير البيانات يخفّض الأبعاد والجودة
+  /// (1024px/جودة 60 بدل 1600px/80) فيقل حجم الرفع ويُحفظ على باقة المستخدم.
+  static ({double maxWidth, int quality}) get imageUploadSettings =>
+      dataSaver.value
+          ? (maxWidth: 1024, quality: 60)
+          : (maxWidth: 1600, quality: 80);
+
   /// صور حُمّلت يدوياً في هذه الجلسة (لا تُسأل مرتين)
   static final Set<String> manuallyLoaded = <String>{};
 
