@@ -1936,6 +1936,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       return;
     }
     if (!widget.canPost || widget.isChannel) return;
+    if (!await ensureLocationPermission()) {
+      _snack('فعّل صلاحية الموقع وGPS لمشاركة موقعك');
+      return;
+    }
     _snack('جارٍ تحديد موقعك…');
     Position pos;
     try {
@@ -1957,13 +1961,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
 
   /// «على الخريطة» (2.3.1): المنتقي مباشرة بلا GPS — مشاركة أي نقطة
   /// (مكان عمل، مقر اجتماع) لا موقعك الحالي بالضرورة
-  Timer? _liveTimer;
-  String? _liveSid;
-  DateTime? _liveUntil;
-  String _liveLabel = '';
-  final ValueNotifier<bool> _liveOn = ValueNotifier(false);
-
-  /// موقع مباشر: تحديث كل 30 ثانية والمحادثة مفتوحة، بمدة تنتهي تلقائياً
+  /// موقع مباشر: خدمة أمامية بإشعار دائم تعيش خارج الشاشة، وتنتهي بالمدة
   Future<void> _startLive() async {
     if (_isMuted || !widget.canPost || widget.isChannel) return;
     final mins = await showDialog<int>(
@@ -1979,60 +1977,20 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
           const Padding(
             padding: EdgeInsets.fromLTRB(24, 8, 24, 8),
             child: Text(
-                'يتحدّث موقعك طالما التطبيق والمحادثة مفتوحان، وتنتهي المشاركة تلقائياً بانتهاء المدة. يمكنك الإيقاف في أي وقت.',
+                'يستمر التحديث والتطبيق في الخلفية مع إشعار دائم، وتنتهي المشاركة تلقائياً بانتهاء المدة، ويمكنك الإيقاف في أي وقت. إن أنهيت التطبيق بالسحب من قائمة التطبيقات الأخيرة قد تتوقف التحديثات.',
                 style: TextStyle(fontSize: 12, height: 1.6)),
           ),
         ],
       ),
     );
     if (mins == null || !mounted) return;
-    _liveTimer?.cancel();
-    _liveSid = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
-    _liveUntil = DateTime.now().add(Duration(minutes: mins));
-    _liveLabel = 'موقعي المباشر';
-    final ok = await _pushLive(false);
-    if (!ok) {
-      _liveSid = null;
+    if (!await ensureLocationPermission()) {
+      _snack('فعّل صلاحية الموقع وGPS لمشاركة الموقع');
       return;
     }
-    _liveOn.value = true;
-    _liveTimer = Timer.periodic(
-        const Duration(seconds: LiveLocationService.intervalSeconds), (_) async {
-      if (_liveUntil == null || DateTime.now().isAfter(_liveUntil!)) {
-        await _stopLive();
-        return;
-      }
-      await _pushLive(false);
-    });
-  }
-
-  Future<bool> _pushLive(bool ended) async {
-    final sid = _liveSid, until = _liveUntil;
-    if (sid == null || until == null) return false;
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.medium,
-              timeLimit: Duration(seconds: 12)));
-      await _sendLocationAt(
-          double.parse(pos.latitude.toStringAsFixed(6)),
-          double.parse(pos.longitude.toStringAsFixed(6)),
-          LiveLocationService.wrap(sid, until, ended, _liveLabel));
-      return true;
-    } catch (_) {
-      if (!ended) _snack('تعذّر تحديد الموقع — تحقق من صلاحية الموقع وتشغيل GPS');
-      return false;
-    }
-  }
-
-  Future<void> _stopLive() async {
-    _liveTimer?.cancel();
-    _liveTimer = null;
-    final was = _liveSid != null;
-    if (was) await _pushLive(true);
-    _liveSid = null;
-    _liveUntil = null;
-    _liveOn.value = false;
+    final ok = await LiveShare.start(widget.conversationId, mins,
+        (lat, lng, label) => _sendLocationAt(lat, lng, label));
+    if (!ok) _snack('تعذّر بدء مشاركة الموقع');
   }
 
   Future<void> _pickLocation() async {
@@ -2049,7 +2007,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   /// إرسال نقطة موقع: تشفير بنفس مسار النص (جلسة متدرجة للخاص ومفتاح
   /// المحادثة للمجموعات) ثم إدراج type=location — منتقي الخريطة نفسه
   /// هو التأكيد: دبوس مرئي على النقطة + وصف قابل للتحرير قبل الإرسال
-  Future<void> _sendLocationAt(double lat, double lng, String label) async {
+  Future<bool> _sendLocationAt(double lat, double lng, String label) async {
     final replyTo = _replyTo;
     final content = '$lat,$lng|$label';
     var payload = content;
@@ -2061,25 +2019,25 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
               widget.conversationId, widget.otherId!, content);
           if (p == null) {
             _snack(_keyMissingMsg());
-            return;
+            return false;
           }
           payload = p;
         } catch (_) {
           _snack('تعذّر تشفير الموقع');
-          return;
+          return false;
         }
       } else {
         final key = await _convKey();
         if (key == null) {
           _snack(_keyMissingMsg());
-          return;
+          return false;
         }
         try {
           payload =
               await E2eService.encryptText(key, widget.conversationId, content);
         } catch (_) {
           _snack('تعذّر تشفير الموقع');
-          return;
+          return false;
         }
       }
     }
@@ -2100,7 +2058,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       } else {
         _snack('تعذّر إرسال الموقع');
       }
+      return false;
     }
+    return true;
   }
 
   /// مرشحات البحث (2.4.0): مطابقة النوع المختار
@@ -2293,7 +2253,6 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
 
   @override
   void dispose() {
-    _liveTimer?.cancel();
     _itemPositions.itemPositions.removeListener(_onPositions);
     _derivedFromStream.dispose();
     _awayFromBottom.dispose();
@@ -5679,9 +5638,9 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
             ),
           ),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
-          ValueListenableBuilder<bool>(
-            valueListenable: _liveOn,
-            builder: (_, on, _) => !on
+          ValueListenableBuilder<String?>(
+            valueListenable: LiveShare.activeConversation,
+            builder: (_, conv, _) => conv != widget.conversationId
                 ? const SizedBox.shrink()
                 : Container(
                     key: const ValueKey('live-banner'),
@@ -5697,7 +5656,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                               style: TextStyle(fontWeight: FontWeight.w700))),
                       TextButton(
                           key: const ValueKey('live-stop'),
-                          onPressed: _stopLive,
+                          onPressed: () => LiveShare.stop(),
                           child: const Text('إيقاف')),
                     ]),
                   ),
