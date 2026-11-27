@@ -85,7 +85,10 @@ import 'media_gallery_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
 import '../services/live_location_service.dart';
+import '../services/message_buttons.dart';
 import '../services/missed_summary_service.dart';
+import '../widgets/button_editor_sheet.dart';
+import '../widgets/message_buttons_row.dart';
 import '../widgets/location_card.dart';
 import 'voice_room_screen.dart';
 import '../widgets/wasl_sheet.dart';
@@ -834,6 +837,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     ..repeat();
   // 2.2.0: «حذف لدي» (إخفاء محلي) + قفل منع التنفيذ المزدوج للإجراءات
   Set<String> _hiddenIds = {};
+  List<MessageButton> _pendingButtons = [];
   bool _myReadCaptured = false;
   DateTime? _myReadAtOnOpen;
   bool _barBusy = false;
@@ -2462,7 +2466,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
         'type': 'text',
         'content': payload,
         if (replyTo != null) 'reply_to': replyTo['id'],
+        if (widget.isChannel && _pendingButtons.isNotEmpty)
+          'buttons': MessageButton.toJsonList(_pendingButtons),
       });
+      if (_pendingButtons.isNotEmpty && mounted) {
+        setState(() => _pendingButtons = []);
+      }
       MetricsService.recordDelivery(
           DateTime.now().difference(t0).inMilliseconds);
     } catch (e) {
@@ -3407,9 +3416,29 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
             if (hasUrl && m['deleted_at'] == null)
               LinkPreviewCard(
                   text: text, mine: mine, ink: mine ? _ink.primary : null),
+            if (m['deleted_at'] == null)
+              MessageButtonsRow(
+                  buttons: MessageButton.parseAll(m['buttons']),
+                  onTap: _onMessageButton),
           ],
         );
     }
+  }
+
+  Future<void> _onMessageButton(MessageButton b) async {
+    if (b.kind == ButtonKind.url) {
+      final u = Uri.tryParse(b.value);
+      if (u == null || !MessageButton.validUrl(b.value)) return;
+      await launchUrl(u, mode: LaunchMode.externalApplication);
+    } else {
+      await Clipboard.setData(ClipboardData(text: b.value));
+      _snack('نُسخ النص');
+    }
+  }
+
+  Future<void> _editPendingButtons() async {
+    final r = await showButtonEditor(context, _pendingButtons);
+    if (r != null && mounted) setState(() => _pendingButtons = r);
   }
 
   /// سطر الترجمة الفورية تحت رسالة واردة — أو مؤشر «جارٍ الترجمة»
@@ -4538,6 +4567,15 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
               onTap: () => go(ctx, _openVoiceRoom)),
         if (widget.isChannel && widget.canPost)
           SheetTile(
+              icon: Icons.smart_button_rounded,
+              color: WaslColors.violet,
+              title: 'أزرار للرسالة التالية',
+              subtitle: _pendingButtons.isEmpty
+                  ? 'رابط أو نسخ نص تحت رسالتك'
+                  : '${_pendingButtons.length} أزرار جاهزة',
+              onTap: () => go(ctx, _editPendingButtons)),
+        if (widget.isChannel && widget.canPost)
+          SheetTile(
               icon: Icons.query_stats_rounded,
               color: WaslColors.teal,
               title: 'إحصاءات القناة',
@@ -5647,6 +5685,23 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                     ]),
                   ),
           ),
+          if (widget.isChannel && _pendingButtons.isNotEmpty)
+            Container(
+              key: const ValueKey('pending-buttons'),
+              color: WaslColors.violet.withValues(alpha: 0.14),
+              padding: const EdgeInsets.symmetric(horizontal: WaslSpace.md, vertical: 4),
+              child: Row(children: [
+                const Icon(Icons.smart_button_rounded, size: 18, color: WaslColors.violet),
+                const SizedBox(width: WaslSpace.sm),
+                Expanded(
+                    child: Text('${_pendingButtons.length} أزرار ستُرفق بالرسالة التالية',
+                        style: const TextStyle(fontWeight: FontWeight.w700))),
+                TextButton(onPressed: _editPendingButtons, child: const Text('تعديل')),
+                IconButton(
+                    onPressed: () => setState(() => _pendingButtons = []),
+                    icon: const Icon(Icons.close_rounded, size: 18)),
+              ]),
+            ),
           if (widget.canPost && _composeBanner() != null) _composeBanner()!,
           if (_iBlockedPeer)
             _blockedBanner()
