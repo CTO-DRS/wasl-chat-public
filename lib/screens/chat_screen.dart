@@ -85,6 +85,7 @@ import 'media_gallery_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
 import '../services/live_location_service.dart';
+import '../services/heavy_compute.dart';
 import '../services/message_buttons.dart';
 import '../services/missed_summary_service.dart';
 import '../widgets/button_editor_sheet.dart';
@@ -3649,7 +3650,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     _dailyTried = true;
     try {
       if (await _dailyStore.load(widget.conversationId, now) != null) return;
-      final text = _buildDailySummaryFrom(all);
+      final text = await _buildDailySummaryFrom(all);
       if (text != null) await _dailyStore.save(widget.conversationId, text, now);
     } catch (_) {
       // الفشل يهبط: القائمة تعمل والملخص الفوري في قائمة وصل AI يعمل على أي حال
@@ -3657,7 +3658,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   }
 
   /// بناء ملخص اليوم من رسائل اليوم المفكوكة — null إن لم توجد رسائل اليوم
-  String? _buildDailySummaryFrom(List<Map<String, dynamic>> all) {
+  Future<String?> _buildDailySummaryFrom(List<Map<String, dynamic>> all) {
     final now = DateTime.now();
     final dayStart = DateTime(now.year, now.month, now.day);
     final lines = <DailyLine>[];
@@ -3676,7 +3677,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       if (plain == null || plain.trim().isEmpty) continue;
       lines.add(DailyLine(who: who, text: plain));
     }
-    return DailySummaryService.build(lines, now);
+    return buildDailyOffMain(lines, now);
   }
 
   /// «ما فاتني»: رسائل الآخرين التي وصلت بعد آخر قراءة لك عند فتح المحادثة
@@ -3698,7 +3699,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       if (plain == null || plain.trim().isEmpty) continue;
       lines.add(MissedLine(who: who, text: plain));
     }
-    return MissedSummaryService.build(lines) ?? 'ما فاتك شيء، أنت على اطلاع بكل الرسائل.';
+    return await buildMissedOffMain(lines) ?? 'ما فاتك شيء، أنت على اطلاع بكل الرسائل.';
   }
 
   /// ملخص اليوم للعرض من قائمة وصل AI: المخزن أولاً ثم البناء فوراً
@@ -3706,7 +3707,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     final now = DateTime.now();
     final stored = await _dailyStore.load(widget.conversationId, now);
     if (stored != null) return stored;
-    final text = _buildDailySummaryFrom(_allMsgs);
+    final text = await _buildDailySummaryFrom(_allMsgs);
     if (text != null) {
       unawaited(_dailyStore.save(widget.conversationId, text, now));
       return text;
@@ -3717,7 +3718,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   // ---------- الملخص الأسبوعي المحلي (المرحلة 14 أ — 1.3.0) ----------
   /// بناء ملخص الأسبوع (نافذة متدحرجة 7 أيام) من الرسائل المفكوكة — null
   /// إن لم توجد رسائل نصية داخل النافذة — بلا أي شبكة كالملخص اليومي.
-  String? _buildWeeklySummaryFrom(List<Map<String, dynamic>> all) {
+  Future<String?> _buildWeeklySummaryFrom(List<Map<String, dynamic>> all) {
     final now = DateTime.now();
     final weekStart = now.subtract(const Duration(days: 7));
     final lines = <WeeklyLine>[];
@@ -3738,7 +3739,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
       if (plain == null || plain.trim().isEmpty) continue;
       lines.add(WeeklyLine(who: who, text: plain, createdAt: created));
     }
-    return WeeklySummaryService.build(lines, now);
+    return buildWeeklyOffMain(lines, now);
   }
 
   /// ملخص الأسبوع للعرض من قائمة وصل AI: المخزن أولاً ثم البناء فوراً.
@@ -3746,7 +3747,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     final now = DateTime.now();
     final stored = await _weeklyStore.load(widget.conversationId, now);
     if (stored != null) return stored;
-    final text = _buildWeeklySummaryFrom(_allMsgs);
+    final text = await _buildWeeklySummaryFrom(_allMsgs);
     if (text != null) {
       unawaited(_weeklyStore.save(widget.conversationId, text, now));
       return text;

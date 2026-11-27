@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wasl_chat/services/album_service.dart';
+import 'package:wasl_chat/services/heavy_compute.dart';
 import 'package:wasl_chat/services/daily_summary_service.dart';
 import 'package:wasl_chat/services/live_location_service.dart';
 import 'package:wasl_chat/services/message_buttons.dart';
@@ -93,5 +94,18 @@ void main() {
     // ignore: avoid_print
     print('SemanticSearch.tokens x$n: ${ms}ms');
     expect(ms, lessThan(1500));
+  });
+
+  test('البناء خارج الخيط الرئيسي يعطي النص نفسه بالضبط (كبير وصغير)', () async {
+    final missed = [
+      for (final m in msgs.where((m) => m['type'] == 'text'))
+        MissedLine(who: m['sender_id'] as String, text: m['content'] as String)
+    ];
+    final daily = [for (final l in missed) DailyLine(who: l.who, text: l.text)];
+    expect(missed.length, greaterThan(heavyThreshold));
+    expect(await buildMissedOffMain(missed), MissedSummaryService.build(missed));
+    expect(await buildDailyOffMain(daily, base), DailySummaryService.build(daily, base));
+    final small = missed.take(20).toList();
+    expect(await buildMissedOffMain(small), MissedSummaryService.build(small));
   });
 }
