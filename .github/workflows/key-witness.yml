@@ -34,8 +34,8 @@ jobs:
             "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" logdir \
             2>/dev/null || git init -b witness-log logdir
           cd logdir
-          git config user.name "wasl-witness-bot"
-          git config user.email "witness@waslchat.app"
+          git config user.name "CTO-DRS"
+          git config user.email "cto.drs@gmail.com"
       - name: إلحاح لقطة الشهود بتحقق الاتساق قبل الكتابة
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
