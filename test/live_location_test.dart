@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:wasl_chat/services/live_location_service.dart';
 import 'package:wasl_chat/theme.dart';
 import 'package:wasl_chat/widgets/live_status_row.dart';
+import 'package:wasl_chat/widgets/location_card.dart';
 
 import 'support/render_harness.dart';
 
@@ -68,5 +69,47 @@ void main() {
     await tester.pumpAndSettle();
     await expectLater(find.byType(Scaffold),
         matchesGoldenFile('goldens/live_status_dark_ar.png'));
+  });
+
+  test('رابط البلاطة يطابق حساب OSM المعروف', () {
+    // مكة المكرمة تقريباً عند z=14
+    expect(LocationCard.tileUrl(21.4225, 39.8262), 'https://tile.openstreetmap.org/14/10004/7193.png');
+  });
+
+  testWidgets('بطاقة الموقع المباشر: حالات ونقر', (tester) async {
+    await loadRenderFonts();
+    tester.view.physicalSize = const Size(390 * 3, 820 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    var taps = 0;
+    await tester.pumpWidget(renderHarness(
+        Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(children: [
+              for (final st in [LiveState.live, LiveState.stale, null]) ...[
+                LocationCard(
+                    lat: 21.4225,
+                    lng: 39.8262,
+                    label: st == null ? 'مكتب الشركة' : 'موقعي المباشر',
+                    liveState: st,
+                    fill: const Color(0xFF1B2030),
+                    titleColor: Colors.white,
+                    subColor: Colors.white70,
+                    onTap: () => taps++),
+                const SizedBox(height: 16),
+              ]
+            ]),
+          ),
+        ),
+        WaslTheme.dark));
+    await tester.pumpAndSettle();
+    expect(find.text('موقع مباشر'), findsOneWidget);
+    expect(find.text('موقع مباشر · توقفت التحديثات'), findsOneWidget);
+    await tester.tap(find.text('مكتب الشركة'));
+    expect(taps, 1);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+    await expectLater(find.byType(Scaffold), matchesGoldenFile('goldens/location_card_dark_ar.png'));
   });
 }

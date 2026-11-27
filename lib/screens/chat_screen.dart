@@ -5,7 +5,6 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart' show SecretKey;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
-import 'dart:math' show cos, log, pi, tan;
 import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
 import 'package:geolocator/geolocator.dart';
@@ -86,7 +85,7 @@ import 'media_gallery_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
 import '../services/live_location_service.dart';
-import '../widgets/live_status_row.dart';
+import '../widgets/location_card.dart';
 import 'voice_room_screen.dart';
 import '../widgets/wasl_sheet.dart';
 import '../services/post_build_coalescer.dart';
@@ -1856,72 +1855,16 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
             DateTime.tryParse(m['created_at'] as String? ?? '')?.toLocal() ??
                 DateTime.now(),
             DateTime.now());
-    const z = 14;
-    final n = 1 << z;
-    final xt = (((lng + 180) / 360) * n).floor().clamp(0, n - 1);
-    final rad = lat * pi / 180;
-    final yt =
-        ((1 - (log(tan(rad) + 1 / cos(rad)) / pi)) / 2 * n).floor().clamp(0, n - 1);
-    final tile = 'https://tile.openstreetmap.org/$z/$xt/$yt.png';
-    return InkWell(
-      borderRadius: BorderRadius.circular(WaslRadius.md),
+    return LocationCard(
+      lat: lat,
+      lng: lng,
+      label: label,
+      liveState: liveState,
+      fill: mine ? _ink.quoteFill : context.glass,
+      titleColor: mine ? _ink.primary : context.textTertiary,
+      subColor: mine ? _ink.secondary : context.textFaint,
       onTap: () => launchUrl(Uri.parse(_locUrl(lat, lng)),
           mode: LaunchMode.externalApplication),
-      child: Container(
-        width: 240,
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(WaslRadius.md),
-          color: mine ? _ink.quoteFill : context.glass,
-          border: Border.all(color: context.hairline),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Stack(alignment: Alignment.center, children: [
-              Image.network(tile,
-                  width: 240,
-                  height: 140,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => Container(
-                        width: 240,
-                        height: 140,
-                        color: WaslColors.indigo.withValues(alpha: 0.25),
-                        alignment: Alignment.center,
-                        child: const Icon(Icons.map_rounded,
-                            size: 42, color: WaslColors.teal),
-                      )),
-              const Icon(Icons.location_on_rounded,
-                  size: 34,
-                  color: WaslColors.danger,
-                  shadows: [Shadow(blurRadius: 6, color: Colors.black45)]),
-            ]),
-            Padding(
-              padding: const EdgeInsets.all(WaslSpace.sm),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (liveState != null)
-                      Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: LiveStatusRow(liveState)),
-                    Text(label.isEmpty ? 'موقع' : label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: WaslFont.meta,
-                            fontWeight: FontWeight.w800,
-                            color: mine ? _ink.primary : context.textTertiary)),
-                    Text('${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                        style: TextStyle(
-                            fontSize: WaslFont.caption,
-                            color: mine ? _ink.secondary : context.textFaint)),
-                  ]),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
