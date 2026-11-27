@@ -85,6 +85,8 @@ import 'image_editor_screen.dart';
 import 'media_gallery_screen.dart';
 import 'video_screen.dart';
 import 'verify_qr_screen.dart';
+import '../services/live_location_service.dart';
+import '../widgets/live_status_row.dart';
 import 'voice_room_screen.dart';
 import '../widgets/wasl_sheet.dart';
 import '../services/post_build_coalescer.dart';
@@ -1844,7 +1846,16 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
               color: mine ? _ink.tertiary : context.textTertiary,
               fontStyle: FontStyle.italic));
     }
-    final (lat, lng, label) = loc;
+    final (lat, lng, rawLabel) = loc;
+    final live = LiveLocationService.parse(rawLabel);
+    final label = live?.label ?? rawLabel;
+    final liveState = live == null
+        ? null
+        : LiveLocationService.stateOf(
+            live,
+            DateTime.tryParse(m['created_at'] as String? ?? '')?.toLocal() ??
+                DateTime.now(),
+            DateTime.now());
     const z = 14;
     final n = 1 << z;
     final xt = (((lng + 180) / 360) * n).floor().clamp(0, n - 1);
@@ -1891,6 +1902,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (liveState != null)
+                      Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: LiveStatusRow(liveState)),
                     Text(label.isEmpty ? 'موقع' : label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1942,6 +1957,84 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
 
   /// «على الخريطة» (2.3.1): المنتقي مباشرة بلا GPS — مشاركة أي نقطة
   /// (مكان عمل، مقر اجتماع) لا موقعك الحالي بالضرورة
+  Timer? _liveTimer;
+  String? _liveSid;
+  DateTime? _liveUntil;
+  String _liveLabel = '';
+  final ValueNotifier<bool> _liveOn = ValueNotifier(false);
+
+  /// موقع مباشر: تحديث كل 30 ثانية والمحادثة مفتوحة، بمدة تنتهي تلقائياً
+  Future<void> _startLive() async {
+    if (_isMuted || !widget.canPost || widget.isChannel) return;
+    final mins = await showDialog<int>(
+      context: context,
+      builder: (c) => SimpleDialog(
+        title: const Text('مشاركة الموقع مباشرة'),
+        children: [
+          for (final (m, t) in [(15, '15 دقيقة'), (60, 'ساعة'), (480, '8 ساعات')])
+            SimpleDialogOption(
+                key: ValueKey('live-$m'),
+                onPressed: () => Navigator.pop(c, m),
+                child: Text(t)),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 8, 24, 8),
+            child: Text(
+                'يتحدّث موقعك طالما التطبيق والمحادثة مفتوحان، وتنتهي المشاركة تلقائياً بانتهاء المدة. يمكنك الإيقاف في أي وقت.',
+                style: TextStyle(fontSize: 12, height: 1.6)),
+          ),
+        ],
+      ),
+    );
+    if (mins == null || !mounted) return;
+    _liveTimer?.cancel();
+    _liveSid = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+    _liveUntil = DateTime.now().add(Duration(minutes: mins));
+    _liveLabel = 'موقعي المباشر';
+    final ok = await _pushLive(false);
+    if (!ok) {
+      _liveSid = null;
+      return;
+    }
+    _liveOn.value = true;
+    _liveTimer = Timer.periodic(
+        const Duration(seconds: LiveLocationService.intervalSeconds), (_) async {
+      if (_liveUntil == null || DateTime.now().isAfter(_liveUntil!)) {
+        await _stopLive();
+        return;
+      }
+      await _pushLive(false);
+    });
+  }
+
+  Future<bool> _pushLive(bool ended) async {
+    final sid = _liveSid, until = _liveUntil;
+    if (sid == null || until == null) return false;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.medium,
+              timeLimit: Duration(seconds: 12)));
+      await _sendLocationAt(
+          double.parse(pos.latitude.toStringAsFixed(6)),
+          double.parse(pos.longitude.toStringAsFixed(6)),
+          LiveLocationService.wrap(sid, until, ended, _liveLabel));
+      return true;
+    } catch (_) {
+      if (!ended) _snack('تعذّر تحديد الموقع — تحقق من صلاحية الموقع وتشغيل GPS');
+      return false;
+    }
+  }
+
+  Future<void> _stopLive() async {
+    _liveTimer?.cancel();
+    _liveTimer = null;
+    final was = _liveSid != null;
+    if (was) await _pushLive(true);
+    _liveSid = null;
+    _liveUntil = null;
+    _liveOn.value = false;
+  }
+
   Future<void> _pickLocation() async {
     if (_isMuted) {
       _snack('أنت مكتوم في هذا المجتمع — لا يمكنك الإرسال');
@@ -2039,7 +2132,8 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
     if (t == 'location') {
       final loc = _locParts(_textOf(m) ?? '');
       if (loc == null) return null;
-      return loc.$3.isEmpty ? 'موقع' : loc.$3;
+      final lbl = LiveLocationService.parse(loc.$3)?.label ?? loc.$3;
+      return lbl.isEmpty ? 'موقع' : lbl;
     }
     return _textOf(m);
   }
@@ -2199,6 +2293,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
 
   @override
   void dispose() {
+    _liveTimer?.cancel();
     _itemPositions.itemPositions.removeListener(_onPositions);
     _derivedFromStream.dispose();
     _awayFromBottom.dispose();
@@ -2948,6 +3043,10 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
           SheetAction(Icons.location_on_rounded, 'موقعي', WaslColors.teal, () {
             Navigator.pop(ctx);
             _sendMyLocation();
+          }),
+          SheetAction(Icons.podcasts_rounded, 'موقع مباشر', WaslColors.danger, () {
+            Navigator.pop(ctx);
+            _startLive();
           }),
           // الموقع على الخريطة (2.3.1): اختيار أي نقطة لا موقعك الحالي فقط
           SheetAction(Icons.map_rounded, 'على الخريطة', WaslColors.indigo, () {
@@ -5343,9 +5442,12 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                 // الألبوم المتعدد (0.20.0): القطع المتتالية بمعرّف واحد فقاعة واحدة
                 // 2.2.0: «حذف لدي» — المخفي يختفي من العرض فقط؛ تبقى
                 // البيانات كاملة للتأكيد والمقروء والرحلة كما هي
-                final visibleMsgs = msgs
-                    .where((r) => !_hiddenIds.contains(r['id'] as String?))
-                    .toList();
+                final visibleMsgs = LiveLocationService.collapse(
+                    msgs
+                        .where((r) => !_hiddenIds.contains(r['id'] as String?))
+                        .toList(),
+                    _textOf,
+                    _locParts);
                 final items = AlbumService.group(visibleMsgs);
                 _allMsgs = all;
                 // 2.1.0: تأكيد وصول الوارد + تعلّم صدى رسائلي (للإيصالات)
@@ -5577,6 +5679,29 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
             ),
           ),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
+          ValueListenableBuilder<bool>(
+            valueListenable: _liveOn,
+            builder: (_, on, _) => !on
+                ? const SizedBox.shrink()
+                : Container(
+                    key: const ValueKey('live-banner'),
+                    color: WaslColors.teal.withValues(alpha: 0.14),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: WaslSpace.md, vertical: 4),
+                    child: Row(children: [
+                      const Icon(Icons.podcasts_rounded,
+                          size: 18, color: WaslColors.teal),
+                      const SizedBox(width: WaslSpace.sm),
+                      const Expanded(
+                          child: Text('تشارك موقعك مباشرة',
+                              style: TextStyle(fontWeight: FontWeight.w700))),
+                      TextButton(
+                          key: const ValueKey('live-stop'),
+                          onPressed: _stopLive,
+                          child: const Text('إيقاف')),
+                    ]),
+                  ),
+          ),
           if (widget.canPost && _composeBanner() != null) _composeBanner()!,
           if (_iBlockedPeer)
             _blockedBanner()
