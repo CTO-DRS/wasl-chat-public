@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config.dart';
 import 'lru_cache.dart';
+import 'retry.dart';
 
 /// رفع الوسائط إلى Supabase Storage وجلب روابط مؤقتة آمنة
 class MediaService {
@@ -19,11 +20,17 @@ class MediaService {
   }) async {
     final uid = supabase.auth.currentUser!.id.substring(0, 8);
     final path = '$conversationId/${DateTime.now().millisecondsSinceEpoch}_$uid.$ext';
-    await supabase.storage.from(bucket).uploadBinary(
-          path,
-          bytes,
-          fileOptions: FileOptions(contentType: contentType),
-        );
+    // المسار يُحسب مرة واحدة فتعيد المحاولات الرفع إلى المسار نفسه. الرفع
+    // الواحد ذرّي في التخزين (لا كائن ناقص)، وليس استئنافاً بالبايت: الاستئناف
+    // الحقيقي (TUS) بند خارطة الطريق. لا upsert: لا سياسة UPDATE على الدلو.
+    await retryWithBackoff(
+      (_) => supabase.storage.from(bucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType),
+          ),
+      shouldRetry: isTransientUploadError,
+    );
     return path;
   }
 
