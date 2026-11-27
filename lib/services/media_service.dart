@@ -7,10 +7,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config.dart';
 import 'lru_cache.dart';
 import 'retry.dart';
+import 'tus_upload.dart';
 
 /// رفع الوسائط إلى Supabase Storage وجلب روابط مؤقتة آمنة
 class MediaService {
   static const bucket = 'chat-media';
+
+  /// فوق هذا الحجم نستعمل الرفع القابل للاستئناف (أجزاء 6 م.ب)
+  static const tusThreshold = 6 * 1024 * 1024;
 
   static Future<String> upload({
     required String conversationId,
@@ -20,9 +24,25 @@ class MediaService {
   }) async {
     final uid = supabase.auth.currentUser!.id.substring(0, 8);
     final path = '$conversationId/${DateTime.now().millisecondsSinceEpoch}_$uid.$ext';
-    // المسار يُحسب مرة واحدة فتعيد المحاولات الرفع إلى المسار نفسه. الرفع
-    // الواحد ذرّي في التخزين (لا كائن ناقص)، وليس استئنافاً بالبايت: الاستئناف
-    // الحقيقي (TUS) بند خارطة الطريق. لا upsert: لا سياسة UPDATE على الدلو.
+    // المسار يُحسب مرة واحدة. الملفات الكبيرة: TUS يستأنف بالبايت. الصغيرة
+    // وحالة عدم دعم الخادم: رفع واحد ذرّي مع إعادة محاولة. لا upsert: لا
+    // سياسة UPDATE على الدلو.
+    if (bytes.length > tusThreshold) {
+      try {
+        await TusUploader(
+          endpoint: '${AppConfig.supabaseUrl}/storage/v1/upload/resumable',
+          headers: {
+            'Authorization':
+                'Bearer ${supabase.auth.currentSession?.accessToken ?? AppConfig.supabaseAnonKey}',
+            'apikey': AppConfig.supabaseAnonKey,
+          },
+        ).upload(
+            bucket: bucket, path: path, contentType: contentType, bytes: bytes);
+        return path;
+      } on TusUnsupported {
+        // الخادم لا يدعم TUS: نرجع للرفع العادي أدناه
+      }
+    }
     await retryWithBackoff(
       (_) => supabase.storage.from(bucket).uploadBinary(
             path,
