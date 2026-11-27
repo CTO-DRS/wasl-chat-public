@@ -94,6 +94,7 @@ class _ButtonEditorState extends State<ButtonEditor> {
                               maxLength: MessageButton.maxLabel,
                               decoration: const InputDecoration(labelText: 'اسم الزر'))),
                       IconButton(
+                          tooltip: 'حذف الزر',
                           key: ValueKey('btn-del-$i'),
                           onPressed: () => setState(() => rows.removeAt(i)),
                           icon: const Icon(Icons.delete_outline_rounded)),

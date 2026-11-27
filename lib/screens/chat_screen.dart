@@ -5717,6 +5717,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                         style: const TextStyle(fontWeight: FontWeight.w700))),
                 TextButton(onPressed: _editPendingButtons, child: const Text('تعديل')),
                 IconButton(
+                    tooltip: 'إزالة الأزرار',
                     onPressed: () => setState(() => _pendingButtons = []),
                     icon: const Icon(Icons.close_rounded, size: 18)),
               ]),
