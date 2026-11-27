@@ -3418,15 +3418,22 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
               LinkPreviewCard(
                   text: text, mine: mine, ink: mine ? _ink.primary : null),
             if (m['deleted_at'] == null)
-              MessageButtonsRow(
-                  buttons: MessageButton.parseAll(m['buttons']),
-                  onTap: _onMessageButton),
+              Builder(builder: (_) {
+                final idx = MessageButton.parseIndexed(m['buttons']);
+                return MessageButtonsRow(
+                    buttons: [for (final e in idx) e.$2],
+                    onTap: (b) => _onMessageButton(
+                        b, m['id'] as String?, idx.firstWhere((e) => identical(e.$2, b)).$1));
+              }),
           ],
         );
     }
   }
 
-  Future<void> _onMessageButton(MessageButton b) async {
+  Future<void> _onMessageButton(MessageButton b, String? messageId, int index) async {
+    if (widget.isChannel && messageId != null) {
+      unawaited(ChannelStatsService.trackButtonClick(messageId, index));
+    }
     if (b.kind == ButtonKind.url) {
       final u = Uri.tryParse(b.value);
       if (u == null || !MessageButton.validUrl(b.value)) return;
@@ -4328,6 +4335,7 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
   /// وآخر 30 منشوراً بعدّادات مشاهدتها
   Future<void> _showChannelStats() async {
     List<Map<String, dynamic>> rows;
+    final btnStats = await ChannelStatsService.buttonStats(widget.conversationId);
     try {
       rows = await ChannelStatsService.stats(widget.conversationId);
     } catch (e) {
@@ -4393,9 +4401,17 @@ class _ChatScreenState extends State<ChatScreen> with RouteAware, SingleTickerPr
                           dense: true,
                           title: Text(text,
                               maxLines: 2, overflow: TextOverflow.ellipsis),
-                          subtitle: Text(shortTime(p['post_created_at'] as String?),
-                              style: TextStyle(
-                                  color: ctx.textFaint, fontSize: WaslFont.caption)),
+                          subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(shortTime(p['post_created_at'] as String?),
+                                    style: TextStyle(
+                                        color: ctx.textFaint, fontSize: WaslFont.caption)),
+                                for (final bs in btnStats[p['post_id'] as String?] ?? const <ButtonClickStat>[])
+                                  Text('🔘 ${ChannelStatsService.clicksLabel(bs)}',
+                                      style: TextStyle(
+                                          color: ctx.textTertiary, fontSize: WaslFont.caption)),
+                              ]),
                           trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                             Icon(Icons.remove_red_eye_outlined,
                                 size: 15, color: ctx.textTertiary),

@@ -41,6 +41,57 @@ class ChannelStatsService {
     return List<Map<String, dynamic>>.from(data as List);
   }
 
+  /// تسجيل نقرة زر (مرة لكل مستخدم/زر في الخادم) — صامتة عند الفشل
+  static Future<void> trackButtonClick(String messageId, int index) async {
+    try {
+      await supabase.rpc('track_button_click',
+          params: {'p_msg': messageId, 'p_idx': index});
+    } catch (_) {}
+  }
+
+  /// نقرات أزرار آخر 30 منشوراً (للمشرفين): معرف الرسالة -> أزرارها بعدّاداتها
+  static Future<Map<String, List<ButtonClickStat>>> buttonStats(String convId) async {
+    try {
+      final data = await supabase
+          .rpc('channel_button_stats', params: {'p_conv': convId});
+      return groupButtonStats(List<Map<String, dynamic>>.from(data as List));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Map<String, List<ButtonClickStat>> groupButtonStats(
+      List<Map<String, dynamic>> rows) {
+    final out = <String, List<ButtonClickStat>>{};
+    for (final r in rows) {
+      final id = r['message_id'] as String?;
+      if (id == null) continue;
+      (out[id] ??= []).add(ButtonClickStat(
+          (r['btn_idx'] as num?)?.toInt() ?? 0,
+          (r['label'] as String?) ?? '',
+          (r['clicks'] as num?)?.toInt() ?? 0));
+    }
+    for (final l in out.values) {
+      l.sort((a, b) => a.index.compareTo(b.index));
+    }
+    return out;
+  }
+
+  /// سطر نقرات الزر: «افتح: 12 نقرة» بجمع عربي سليم
+  static String clicksLabel(ButtonClickStat s) {
+    final n = s.clicks;
+    final t = n == 0
+        ? 'لا نقرات'
+        : n == 1
+            ? 'نقرة واحدة'
+            : n == 2
+                ? 'نقرتان'
+                : n < 11
+                    ? '${formatCount(n)} نقرات'
+                    : '${formatCount(n)} نقرة';
+    return '${s.label}: $t';
+  }
+
   // ---------- مساعدات عرض نقية (مُختبَرة) ----------
 
   /// تنسيق الأعداد العربية: 999 / 1.2 ألف / 3.4 مليون
@@ -76,4 +127,12 @@ class ChannelStatsService {
     if (avg <= 0) return 'لا مشاهدات بعد';
     return 'متوسط ${viewsLabel(avg)} للمنشور';
   }
+}
+
+/// عدّاد نقرات زر واحد في منشور قناة.
+class ButtonClickStat {
+  const ButtonClickStat(this.index, this.label, this.clicks);
+  final int index;
+  final String label;
+  final int clicks;
 }

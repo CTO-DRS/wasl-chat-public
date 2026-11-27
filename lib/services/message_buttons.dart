@@ -45,6 +45,16 @@ class MessageButton {
     ];
   }
 
+  /// نفس parseAll لكن بموضع كل زر في المصفوفة الأصلية (أساس تسجيل النقرات:
+  /// الخادم يعدّ بالموضع الأصلي حتى لو سقط عنصر فاسد قبله).
+  static List<(int, MessageButton)> parseIndexed(Object? raw) {
+    if (raw is! List) return const [];
+    return [
+      for (var i = 0; i < raw.length && i < maxButtons; i++)
+        if (tryParse(raw[i]) case final b?) (i, b)
+    ];
+  }
+
   static List<Map<String, dynamic>> toJsonList(List<MessageButton> l) =>
       [for (final b in l) b.toJson()];
 }
