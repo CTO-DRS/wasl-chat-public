@@ -116,6 +116,26 @@ void main() {
     expect(BusinessReplyService.templates.value, isEmpty);
   });
 
+  testWidgets('حذف قالب يظهر شريط تراجع ويعيد القالب وقواعده', (tester) async {
+    ignoreGlassTileAsserts();
+    tester.view.physicalSize = const Size(390 * 3, 900 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    _seed();
+    final tplCount = BusinessReplyService.templates.value.length;
+    final ruleCount = BusinessReplyService.rules.value.length;
+    await tester.pumpWidget(renderHarness(const BusinessRepliesScreen(), WaslTheme.dark));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('حذف القالب').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // لا settle: ينتهي الشريط
+    expect(BusinessReplyService.templates.value.length, tplCount - 1);
+    await tester.tap(find.text('تراجع'));
+    await tester.pumpAndSettle();
+    expect(BusinessReplyService.templates.value.length, tplCount);
+    expect(BusinessReplyService.rules.value.length, ruleCount);
+  });
+
   for (final dark in [true, false]) {
     testWidgets('لقطة ردود الأعمال - ${dark ? 'داكن' : 'فاتح'}', (tester) async {
       ignoreGlassTileAsserts();

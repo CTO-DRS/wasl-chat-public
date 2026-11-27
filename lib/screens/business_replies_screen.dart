@@ -74,7 +74,33 @@ class _BusinessRepliesScreenState extends State<BusinessRepliesScreen> {
     await BusinessReplyService.save();
   }
 
+  void _undoBar(String text, Future<void> Function() undo) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(text),
+        action: SnackBarAction(label: 'تراجع', onPressed: undo),
+      ));
+  }
+
+  Future<void> _deleteRule(AutoReplyRule r) async {
+    final before = [...BusinessReplyService.rules.value];
+    BusinessReplyService.rules.value = [
+      for (final e in before)
+        if (e.id != r.id) e
+    ];
+    if (mounted) setState(() {});
+    _undoBar('حُذفت القاعدة', () async {
+      BusinessReplyService.rules.value = before;
+      if (mounted) setState(() {});
+      await BusinessReplyService.save();
+    });
+    await BusinessReplyService.save();
+  }
+
   Future<void> _deleteTemplate(ReplyTemplate t) async {
+    final beforeT = [...BusinessReplyService.templates.value];
+    final beforeR = [...BusinessReplyService.rules.value];
     BusinessReplyService.templates.value = [
       for (final e in BusinessReplyService.templates.value)
         if (e.id != t.id) e
@@ -84,6 +110,12 @@ class _BusinessRepliesScreenState extends State<BusinessRepliesScreen> {
         if (r.templateId != t.id) r
     ];
     if (mounted) setState(() {});
+    _undoBar('حُذف القالب', () async {
+      BusinessReplyService.templates.value = beforeT;
+      BusinessReplyService.rules.value = beforeR;
+      if (mounted) setState(() {});
+      await BusinessReplyService.save();
+    });
     await BusinessReplyService.save();
   }
 
@@ -171,6 +203,14 @@ class _BusinessRepliesScreenState extends State<BusinessRepliesScreen> {
                 setState(() {});
               },
             ),
+          ]),
+          const SheetSectionLabel('القواعد'),
+          GlassGroup([
+            if (rules.isEmpty)
+              ListTile(
+                  leading: Icon(Icons.rule_rounded, color: context.textFaint),
+                  title: Text('لا قواعد بعد. أضف قاعدة كلمات أو رسالة غياب.',
+                      style: TextStyle(color: context.textFaint))),
             for (final r in rules)
               ListTile(
                 leading: Icon(
@@ -178,23 +218,19 @@ class _BusinessRepliesScreenState extends State<BusinessRepliesScreen> {
                         ? Icons.bedtime_rounded
                         : Icons.key_rounded,
                     color: WaslColors.teal),
-                title: Text(r.kind == ReplyRuleKind.away
-                    ? 'رسالة غياب'
-                    : r.keywords.join('، ')),
-                subtitle: Text('الرد: ${tplName(r.templateId)}'),
+                title: Text(
+                    r.kind == ReplyRuleKind.away ? 'رسالة غياب' : r.keywords.join('، '),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('الرد: ${tplName(r.templateId)}',
+                    style: TextStyle(color: context.textFaint)),
                 trailing: IconButton(
+                  tooltip: 'حذف القاعدة',
                   icon: const Icon(Icons.delete_outline_rounded),
-                  onPressed: () async {
-                    BusinessReplyService.rules.value = [
-                      for (final e in rules)
-                        if (e.id != r.id) e
-                    ];
-                    await BusinessReplyService.save();
-                    setState(() {});
-                  },
+                  onPressed: () => _deleteRule(r),
                 ),
               ),
           ]),
+          const SizedBox(height: WaslSpace.sm),
           Row(children: [
             Expanded(
               child: OutlinedButton.icon(
@@ -230,12 +266,13 @@ class _BusinessRepliesScreenState extends State<BusinessRepliesScreen> {
                     overflow: TextOverflow.ellipsis),
                 onTap: () => _editTemplate(t),
                 trailing: IconButton(
+                  tooltip: 'حذف القالب',
                   icon: const Icon(Icons.delete_outline_rounded),
                   onPressed: () => _deleteTemplate(t),
                 ),
               ),
           ]),
-          const SizedBox(height: WaslSpace.sm),
+          const SizedBox(height: WaslSpace.lg),
           FilledButton.icon(
             key: const ValueKey('add-template'),
             onPressed: () => _editTemplate(),
