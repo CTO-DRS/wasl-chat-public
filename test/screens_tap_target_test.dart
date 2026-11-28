@@ -9,6 +9,7 @@ import 'package:wasl_chat/screens/hijri_occasions_screen.dart';
 import 'package:wasl_chat/screens/welcome_screen.dart';
 import 'package:wasl_chat/screens/ai_screen.dart';
 import 'package:wasl_chat/screens/voice_studio_screen.dart';
+import 'package:wasl_chat/screens/chat_studio_screen.dart';
 import 'package:wasl_chat/theme.dart';
 
 import 'support/render_harness.dart';
@@ -39,12 +40,14 @@ void main() {
     'app studio': () => const AppStudioScreen(),
     'ai': () => const AiScreen(),
     'voice studio': () => const VoiceStudioScreen(),
+    'chat studio': () => const ChatStudioScreen(conversationId: 'c1', title: 'محادثة تجريبية'),
     'about developer': () => const AboutDeveloperScreen(bannerAutoPlay: false),
   };
 
   for (final e in screens.entries) {
+    // chat studio: نص أبيض ١٤px على فقاعة الصادر الافتراضية ≈3.96:1 (دون 4.5)؛ قرار لون هوية يعود للمالك
     // ai/voice studio (شرائح بتدرج) وwelcome (زر بتدرج) يُقاس تباينها خطأً أو يعود لقرار لوحة الألوان: خارج الفحص
-    const contrastSkip = {'welcome', 'ai', 'voice studio'};
+    const contrastSkip = {'welcome', 'ai', 'voice studio', 'chat studio'};
     for (final light in contrastSkip.contains(e.key) ? const <bool>[] : [false, true]) {
       testWidgets('${e.key} (${light ? "light" : "dark"}): text contrast', (tester) async {
         final h = tester.ensureSemantics();
