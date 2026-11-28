@@ -188,7 +188,7 @@ T _enumOf<T extends Enum>(List<T> values, Object? name, T fallback) {
 class StudioStyle {
   const StudioStyle({
     this.accent = 0xFF6366F1,
-    this.accent2 = 0xFF14B8A6,
+    this.accent2 = 0xFF0D9488,
     this.backdrop = StudioBackdrop.plain,
     this.surface = StudioSurface.glass,
     this.roundness = StudioRoundness.round,
@@ -444,7 +444,7 @@ class StudioCatalog {
 
   /// لوحات الألوان — اللون الأساسي لكل منها يحقق تبايناً ≥3:1 مع النص الأبيض
   static const palettes = <StudioPalette>[
-    StudioPalette('وصل', 0xFF6366F1, 0xFF14B8A6),
+    StudioPalette('وصل', 0xFF6366F1, 0xFF0D9488),
     StudioPalette('بنفسج', 0xFF7C3AED, 0xFFEC4899),
     StudioPalette('سماء', 0xFF2563EB, 0xFF06B6D4),
     StudioPalette('زمرد', 0xFF059669, 0xFF10B981),

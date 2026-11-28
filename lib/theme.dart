@@ -8,6 +8,9 @@ import 'widgets/studio_backdrop.dart';
 class WaslColors {
   static const indigo = Color(0xFF6366F1);
   static const teal = Color(0xFF14B8A6);
+
+  /// طرف تدرج الهوية الثاني (أغمق من [teal] ليبلغ 3:1 مع النص الأبيض، بموافقة المالك)
+  static const tealDeep = Color(0xFF0D9488);
   static const violet = Color(0xFFA855F7);
   static const darkBg = Color(0xFF0B0F1A);
   static const darkSurface = Color(0xFF151B2B);
@@ -25,7 +28,7 @@ class WaslColors {
 
   /// تدرج الهوية الأصلي الثابت (نيلة ← تركواز)
   static const brandGradient = LinearGradient(
-    colors: [indigo, teal],
+    colors: [indigo, tealDeep],
     begin: Alignment.topRight,
     end: Alignment.bottomLeft,
   );

@@ -43,9 +43,15 @@ void gradientAudit() {
     // فجوات معروفة (قرار هوية معلّق عند المالك، موثقة في ROADMAP.md): الطرف
     // الفاتح من التدرج تحت 3:1 مع النص الأبيض. الاختبار حارس انحدار: لا فشل
     // جديد خارج هذه القائمة، ولا يزداد أي منها سوءاً.
-    const known = {'وصل', 'سماء', 'زمرد', 'ورد', 'ذهب', 'ياقوت', 'محيط', 'رمادي'};
+    const known = {'سماء', 'زمرد', 'ورد', 'ذهب', 'ياقوت', 'محيط', 'رمادي'};
     final fresh = fails.where((f) => !known.contains(f.split(' ').first)).toList();
     expect(fresh, isEmpty);
+    // التدرج الافتراضي (أُغمق طرفه الثاني إلى #0D9488 بقرار المالك) يجتاز 3:1
+    final d = [Color(StudioStyle.defaults.accent), Color(StudioStyle.defaults.accent2)];
+    final onD = WaslContrast.onColors(d);
+    for (final c in d) {
+      expect(ContrastService.ratio(onD, c), greaterThanOrEqualTo(3.0));
+    }
     expect(fails.every((f) => double.parse(f.split(' ').last) >= 2.1), isTrue,
         reason: 'worse than the recorded floor: $fails');
   });

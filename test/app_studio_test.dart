@@ -19,7 +19,7 @@ void main() {
     test('الافتراضي يطابق ألوان وصل الحالية حرفياً', () {
       const d = StudioStyle.defaults;
       expect(d.accentColor, WaslColors.indigo);
-      expect(d.accent2Color, WaslColors.teal);
+      expect(d.accent2Color, WaslColors.tealDeep);
       expect(d.gradient, WaslColors.brandGradient);
       expect(d.backdrop, StudioBackdrop.plain);
       expect(d.roundness.factor, 1.0);
