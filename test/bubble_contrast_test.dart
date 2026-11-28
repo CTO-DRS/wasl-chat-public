@@ -40,6 +40,15 @@ void main() {
     }
   });
 
+  test('كل ألوان الاختيار الحر (swatches) ≥4.5:1 مع الأبيض', () {
+    // لونا الهوية الافتراضيان يبقيان (ليظهرا محدَّدين في المنتقي): #6366F1=4.47 و#0D9488 قرار المالك
+    const identity = {0xFF6366F1, 0xFF0D9488};
+    for (final c in StudioCatalog.swatches.where((c) => !identity.contains(c))) {
+      expect(ContrastService.ratio(Colors.white, Color(c)), greaterThanOrEqualTo(4.5),
+          reason: '0x${c.toRadixString(16)}');
+    }
+  });
+
   test('الفقاعة الصلبة الافتراضية وتدرج الهوية العام لم يتغيرا للزر', () {
     final solid = BubbleLook.resolve(StudioStyle.defaults.copyWith(bubbleFill: StudioBubbleFill.solid), null);
     expect(ContrastService.ratio(Colors.white, solid.ownColor), greaterThanOrEqualTo(4.5));

@@ -458,11 +458,11 @@ class StudioCatalog {
     StudioPalette('غابة', 0xFF159A46, 0xFF5C950C),
   ];
 
-  /// ألوان حرة للاختيار (اللون الأساسي أو لون فقاعتي) — كلها ≥3:1 مع الأبيض
+  /// ألوان حرة للاختيار (اللون الأساسي أو لون فقاعتي) — كلها ≥4.5:1 مع الأبيض عدا لوني الهوية الافتراضيين (#6366F1 وهو 4.47، و#0D9488) كي يبقى الافتراضي محدداً في المنتقي
   static const swatches = <int>[
-    0xFF6366F1, 0xFF4F46E5, 0xFF7C3AED, 0xFF8B5CF6, 0xFFC026D3, 0xFFDB2777,
-    0xFFE11D48, 0xFFDC2626, 0xFFEA580C, 0xFFD97706, 0xFFA16207, 0xFF65A30D,
-    0xFF16A34A, 0xFF059669, 0xFF0D9488, 0xFF0891B2, 0xFF0284C7, 0xFF2563EB,
+    0xFF6366F1, 0xFF4F46E5, 0xFF7C3AED, 0xFF8554F6, 0xFFC026D3, 0xFFDB2777,
+    0xFFE11D48, 0xFFDC2626, 0xFFCB4C0A, 0xFFB16105, 0xFFA16207, 0xFF51830A,
+    0xFF12883E, 0xFF04865E, 0xFF0D9488, 0xFF07819E, 0xFF027CBB, 0xFF2563EB,
     0xFF1E3A8A, 0xFF475569, 0xFF92400E, 0xFF111827,
   ];
 
