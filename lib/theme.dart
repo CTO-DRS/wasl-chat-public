@@ -203,7 +203,8 @@ extension WaslCtx on BuildContext {
   Color get textTertiary => _dark ? Colors.white60 : WaslColors.ink3;
 
   /// نص شبه معطل (white38/white54 في الداكن)
-  Color get textFaint => _dark ? Colors.white54 : WaslColors.ink4;
+  // الفاتح: #646E87 (≥4.5:1 على الأبيض وسطح الخلفية) لأن النص الصغير الخافت يحتاج AA العادي؛ ink4 يبقى للعناصر شبه المعطلة
+  Color get textFaint => _dark ? Colors.white54 : const Color(0xFF646E87);
 
   /// حدود وفواصل
   Color get hairline => _dark ? Colors.white24 : Colors.black.withValues(alpha: 0.10);

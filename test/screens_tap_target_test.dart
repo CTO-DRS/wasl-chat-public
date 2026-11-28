@@ -15,14 +15,14 @@ import 'support/render_harness.dart';
 
 /// تدقيق أهداف اللمس (48dp) والتسميات على شاشات كاملة بخط مكبّر 1.6.
 void main() {
-  Future<void> pump(WidgetTester tester, Widget child) async {
+  Future<void> pump(WidgetTester tester, Widget child, {bool light = false}) async {
     ignoreGlassTileAsserts();
     tester.view.physicalSize = const Size(360 * 2, 900 * 2);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MediaQuery(
       data: const MediaQueryData(size: Size(360, 900), textScaler: TextScaler.linear(1.6)),
-      child: renderHarness(child, WaslTheme.dark),
+      child: renderHarness(child, light ? WaslTheme.light : WaslTheme.dark),
     ));
     await tester.pump(const Duration(milliseconds: 100));
     for (var i = 0; i < 10; i++) {
@@ -43,6 +43,17 @@ void main() {
   };
 
   for (final e in screens.entries) {
+    // ai/voice studio (شرائح بتدرج) وwelcome (زر بتدرج) يُقاس تباينها خطأً أو يعود لقرار لوحة الألوان: خارج الفحص
+    const contrastSkip = {'welcome', 'ai', 'voice studio'};
+    for (final light in contrastSkip.contains(e.key) ? const <bool>[] : [false, true]) {
+      testWidgets('${e.key} (${light ? "light" : "dark"}): text contrast', (tester) async {
+        final h = tester.ensureSemantics();
+        await pump(tester, e.value(), light: light);
+        await expectLater(tester, meetsGuideline(textContrastGuideline));
+        h.dispose();
+      });
+    }
+
     testWidgets('${e.key}: tap targets, labels, no overflow at 1.6x', (tester) async {
       final h = tester.ensureSemantics();
       await pump(tester, e.value());
