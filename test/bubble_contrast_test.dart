@@ -20,6 +20,26 @@ void main() {
     }
   });
 
+  Color tone(int c) => Color.lerp(Color(c), Colors.black, 0.12)!;
+
+  test('كل لوحات الألوان: طرفا التدرج ≥4.5:1 مع الأبيض بعد تغميق الفقاعة', () {
+    for (final p in StudioCatalog.palettes) {
+      for (final c in [p.accent, p.accent2]) {
+        expect(ContrastService.ratio(Colors.white, tone(c)), greaterThanOrEqualTo(4.5),
+            reason: '${p.name} 0x${c.toRadixString(16)}');
+      }
+    }
+  });
+
+  test('كل السمات الجاهزة: طرفا تدرج الفقاعة ≥4.5:1 مع الأبيض', () {
+    for (final t in StudioCatalog.themes) {
+      for (final c in [t.style.accent, t.style.accent2]) {
+        expect(ContrastService.ratio(Colors.white, tone(c)), greaterThanOrEqualTo(4.5),
+            reason: '${t.name} 0x${c.toRadixString(16)}');
+      }
+    }
+  });
+
   test('الفقاعة الصلبة الافتراضية وتدرج الهوية العام لم يتغيرا للزر', () {
     final solid = BubbleLook.resolve(StudioStyle.defaults.copyWith(bubbleFill: StudioBubbleFill.solid), null);
     expect(ContrastService.ratio(Colors.white, solid.ownColor), greaterThanOrEqualTo(4.5));

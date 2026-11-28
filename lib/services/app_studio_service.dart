@@ -442,20 +442,20 @@ class StudioTheme {
 class StudioCatalog {
   StudioCatalog._();
 
-  /// لوحات الألوان — اللون الأساسي لكل منها يحقق تبايناً ≥3:1 مع النص الأبيض
+  /// لوحات الألوان — طرفا كل تدرج يحققان ≥4.5:1 مع النص الأبيض بعد تغميق الفقاعة 12% (يحرسه bubble_contrast_test)
   static const palettes = <StudioPalette>[
     StudioPalette('وصل', 0xFF6366F1, 0xFF0D9488),
-    StudioPalette('بنفسج', 0xFF7C3AED, 0xFFEC4899),
-    StudioPalette('سماء', 0xFF2563EB, 0xFF06B6D4),
-    StudioPalette('زمرد', 0xFF059669, 0xFF10B981),
-    StudioPalette('غروب', 0xFFEA580C, 0xFFDB2777),
-    StudioPalette('ورد', 0xFFDB2777, 0xFFF472B6),
-    StudioPalette('ذهب', 0xFFA16207, 0xFFF59E0B),
-    StudioPalette('ياقوت', 0xFFDC2626, 0xFFF97316),
-    StudioPalette('محيط', 0xFF0284C7, 0xFF14B8A6),
+    StudioPalette('بنفسج', 0xFF7C3AED, 0xFFEC4396),
+    StudioPalette('سماء', 0xFF2563EB, 0xFF0594AC),
+    StudioPalette('زمرد', 0xFF059669, 0xFF0D986A),
+    StudioPalette('غروب', 0xFFE8570C, 0xFFDB2777),
+    StudioPalette('ورد', 0xFFDB2777, 0xFFF03C9A),
+    StudioPalette('ذهب', 0xFFA16207, 0xFFB97708),
+    StudioPalette('ياقوت', 0xFFDC2626, 0xFFE05F06),
+    StudioPalette('محيط', 0xFF0284C7, 0xFF109587),
     StudioPalette('ليلك', 0xFFC026D3, 0xFF8B5CF6),
-    StudioPalette('رمادي', 0xFF475569, 0xFF94A3B8),
-    StudioPalette('غابة', 0xFF16A34A, 0xFF65A30D),
+    StudioPalette('رمادي', 0xFF475569, 0xFF7487A3),
+    StudioPalette('غابة', 0xFF159A46, 0xFF5C950C),
   ];
 
   /// ألوان حرة للاختيار (اللون الأساسي أو لون فقاعتي) — كلها ≥3:1 مع الأبيض
@@ -479,7 +479,7 @@ class StudioCatalog {
         'dawn',
         'فجر',
         StudioStyle(
-          accent: 0xFFEA580C,
+          accent: 0xFFE8570C,
           accent2: 0xFFDB2777,
           backdrop: StudioBackdrop.soft,
           surface: StudioSurface.elevated,
@@ -494,7 +494,7 @@ class StudioCatalog {
         'صحراء',
         StudioStyle(
           accent: 0xFFA16207,
-          accent2: 0xFFF59E0B,
+          accent2: 0xFFB97708,
           backdrop: StudioBackdrop.sand,
           surface: StudioSurface.solid,
           roundness: StudioRoundness.soft,
@@ -508,7 +508,7 @@ class StudioCatalog {
         'محيط',
         StudioStyle(
           accent: 0xFF0284C7,
-          accent2: 0xFF14B8A6,
+          accent2: 0xFF109587,
           backdrop: StudioBackdrop.ocean,
           appBar: StudioAppBar.glass,
           bubbleTail: true,
@@ -521,7 +521,7 @@ class StudioCatalog {
         'زمرد',
         StudioStyle(
           accent: 0xFF059669,
-          accent2: 0xFF10B981,
+          accent2: 0xFF0D986A,
           backdrop: StudioBackdrop.forest,
           surface: StudioSurface.outlined,
           listStyle: StudioListStyle.cards,
@@ -533,7 +533,7 @@ class StudioCatalog {
         'وردي',
         StudioStyle(
           accent: 0xFFDB2777,
-          accent2: 0xFFF472B6,
+          accent2: 0xFFF03C9A,
           backdrop: StudioBackdrop.dusk,
           roundness: StudioRoundness.extra,
           avatarShape: StudioAvatarShape.squircle,
@@ -578,7 +578,7 @@ class StudioCatalog {
         'شفق',
         StudioStyle(
           accent: 0xFF7C3AED,
-          accent2: 0xFF14B8A6,
+          accent2: 0xFF109587,
           backdrop: StudioBackdrop.aurora,
           appBar: StudioAppBar.glass,
           listStyle: StudioListStyle.cards,
@@ -590,7 +590,7 @@ class StudioCatalog {
         'سماء النجوم',
         StudioStyle(
           accent: 0xFF4F46E5,
-          accent2: 0xFF0EA5E9,
+          accent2: 0xFF0C8FCA,
           backdrop: StudioBackdrop.stars,
           nav: StudioNav.minimal,
           themeId: 'stars',
