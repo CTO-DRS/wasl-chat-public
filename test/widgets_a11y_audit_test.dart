@@ -1,6 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:wasl_chat/services/live_location_service.dart';
 import 'package:wasl_chat/services/message_buttons.dart';
+import 'package:wasl_chat/widgets/live_status_row.dart';
+import 'package:wasl_chat/widgets/location_card.dart';
+import 'package:wasl_chat/widgets/profile_header.dart';
 import 'package:wasl_chat/theme.dart';
 import 'package:wasl_chat/widgets/message_buttons_row.dart';
 import 'package:wasl_chat/widgets/quick_reply_row.dart';
@@ -35,6 +39,27 @@ void main() {
           MessageButton('تسمية طويلة جداً للزر الرابع', ButtonKind.copy, 'x'),
         ],
         onTap: (_) {}),
+    'location card': () => LocationCard(
+        lat: 24.4672,
+        lng: 39.6024,
+        label: 'المسجد النبوي الشريف، المدينة المنورة، المملكة العربية السعودية',
+        fill: const Color(0xFF1E2538),
+        titleColor: Colors.white,
+        subColor: Colors.white70,
+        liveState: LiveState.stale,
+        onTap: () {}),
+    'live status': () => Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final st in LiveState.values) LiveStatusRow(st),
+        ]),
+    'profile identity': () => ProfileIdentity(
+        name: 'محمد بن عبدالله الغامدي الطويل جداً جداً',
+        username: 'mohammed_alghamdi_long_username',
+        verified: true,
+        onCopyUsername: () {},
+        onEditUsername: () {}),
+    'expandable bio': () => const ExpandableBio(
+        text: 'مطوّر ومهتم بالتقنية والخصوصية. أحب القهوة والكتب والسفر. هذه نبذة طويلة لاختبار زر المزيد عند تكبير الخط. ' 
+            'وهذه جملة إضافية حتى يتجاوز النص ثلاثة أسطر في الشاشة الضيقة بالتأكيد.'),
   };
 
   for (final e in widgets.entries) {
