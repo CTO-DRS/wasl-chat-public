@@ -61,7 +61,12 @@ class _ShieldScreenState extends State<ShieldScreen> {
             child: const Icon(Icons.shield_rounded, color: Colors.white),
           ),
           const SizedBox(width: WaslSpace.sm),
-          const Text('Wasl Shield', style: TextStyle(fontWeight: FontWeight.w800)),
+          const Flexible(
+            child: Text('Wasl Shield',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
         ]),
       ),
       body: ValueListenableBuilder<ShieldSettings>(

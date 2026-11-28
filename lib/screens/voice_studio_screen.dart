@@ -337,7 +337,12 @@ class _VoiceStudioScreenState extends State<VoiceStudioScreen> {
             child: const Icon(Icons.graphic_eq_rounded, color: Colors.white),
           ),
           const SizedBox(width: WaslSpace.sm),
-          const Text('استوديو الصوت', style: TextStyle(fontWeight: FontWeight.w800)),
+          const Flexible(
+            child: Text('استوديو الصوت',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
         ]),
       ),
       body: ListView(

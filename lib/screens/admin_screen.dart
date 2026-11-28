@@ -168,7 +168,12 @@ class _AdminScreenState extends State<AdminScreen> {
             child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.white),
           ),
           const SizedBox(width: WaslSpace.sm),
-          const Text('لوحة الإدارة', style: TextStyle(fontWeight: FontWeight.w800)),
+          const Flexible(
+            child: Text('لوحة الإدارة',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
         ]),
       ),
       body: RefreshIndicator(

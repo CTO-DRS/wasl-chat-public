@@ -7,6 +7,8 @@ import 'package:wasl_chat/screens/business_replies_screen.dart';
 import 'package:wasl_chat/screens/feedback_screen.dart';
 import 'package:wasl_chat/screens/hijri_occasions_screen.dart';
 import 'package:wasl_chat/screens/welcome_screen.dart';
+import 'package:wasl_chat/screens/ai_screen.dart';
+import 'package:wasl_chat/screens/voice_studio_screen.dart';
 import 'package:wasl_chat/theme.dart';
 
 import 'support/render_harness.dart';
@@ -35,6 +37,8 @@ void main() {
     'hijri occasions': () => const HijriOccasionsScreen(),
     'beta': () => const BetaScreen(),
     'app studio': () => const AppStudioScreen(),
+    'ai': () => const AiScreen(),
+    'voice studio': () => const VoiceStudioScreen(),
     'about developer': () => const AboutDeveloperScreen(bannerAutoPlay: false),
   };
 

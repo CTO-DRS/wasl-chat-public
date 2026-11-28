@@ -159,7 +159,12 @@ class _AiSettingsScreenState extends State<AiSettingsScreen> {
             child: const Icon(Icons.psychology_rounded, color: Colors.white),
           ),
           const SizedBox(width: WaslSpace.sm),
-          const Text('إعدادات الذكاء', style: TextStyle(fontWeight: FontWeight.w800)),
+          const Flexible(
+            child: Text('إعدادات الذكاء',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
         ]),
       ),
       body: _loading
