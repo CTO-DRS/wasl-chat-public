@@ -1,4 +1,4 @@
-// إعدادات Firebase لمشروع wasl-chat-ac7d3 (أندرويد).
+// إعدادات Firebase لمشروع wasl-chat-7430e (أندرويد).
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
@@ -9,10 +9,10 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyAbsPINNSb5kg1NTm9fNQ1pjFaMqK6yB1U',
-    appId: '1:556011433659:android:96ae8ac5cca4b42227439e',
-    messagingSenderId: '556011433659',
-    projectId: 'wasl-chat-ac7d3',
-    storageBucket: 'wasl-chat-ac7d3.firebasestorage.app',
+    apiKey: 'AIzaSyBkkTOmErvw-X-0tASYPZSwPZQF4TKCD8E',
+    appId: '1:217684408888:android:a5123f13d3363e328ac4cd',
+    messagingSenderId: '217684408888',
+    projectId: 'wasl-chat-7430e',
+    storageBucket: 'wasl-chat-7430e.firebasestorage.app',
   );
 }
