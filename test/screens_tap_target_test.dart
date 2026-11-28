@@ -1,7 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:wasl_chat/screens/about_developer_screen.dart';
+import 'package:wasl_chat/screens/app_studio_screen.dart';
+import 'package:wasl_chat/screens/beta_screen.dart';
 import 'package:wasl_chat/screens/business_replies_screen.dart';
+import 'package:wasl_chat/screens/feedback_screen.dart';
+import 'package:wasl_chat/screens/hijri_occasions_screen.dart';
+import 'package:wasl_chat/screens/welcome_screen.dart';
 import 'package:wasl_chat/theme.dart';
 
 import 'support/render_harness.dart';
@@ -17,11 +22,19 @@ void main() {
       data: const MediaQueryData(size: Size(360, 900), textScaler: TextScaler.linear(1.6)),
       child: renderHarness(child, WaslTheme.dark),
     ));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+    }
   }
 
   final screens = <String, Widget Function()>{
     'business replies': () => const BusinessRepliesScreen(),
+    'welcome': () => WelcomeScreen(onDone: () async {}),
+    'feedback': () => const FeedbackScreen(),
+    'hijri occasions': () => const HijriOccasionsScreen(),
+    'beta': () => const BetaScreen(),
+    'app studio': () => const AppStudioScreen(),
     'about developer': () => const AboutDeveloperScreen(bannerAutoPlay: false),
   };
 
