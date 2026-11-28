@@ -158,7 +158,11 @@ void main() {
       final g = StudioStyle.defaults.copyWith(bubbleShape: StudioBubbleShape.sharp);
       final plain = BubbleLook.resolve(g, ChatStyle.empty);
       expect(plain.radius, 8);
-      expect(plain.gradient, g.gradient);
+      // فقاعة الصادر الافتراضية = تدرج الهوية مغمَّقاً 12% (AA 4.5:1 للنص الأبيض)
+      expect(plain.gradient!.colors, [
+        Color.lerp(g.gradient.colors.first, Colors.black, 0.12),
+        Color.lerp(g.gradient.colors.last, Colors.black, 0.12),
+      ]);
       const c = ChatStyle(ownBubble: 0xFFDC2626, bubbleFill: StudioBubbleFill.solid,
           bubbleShape: StudioBubbleShape.round);
       final over = BubbleLook.resolve(g, c);

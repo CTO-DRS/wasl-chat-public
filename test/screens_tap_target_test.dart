@@ -45,7 +45,7 @@ void main() {
   };
 
   for (final e in screens.entries) {
-    // chat studio: نص أبيض ١٤px على فقاعة الصادر الافتراضية ≈3.96:1 (دون 4.5)؛ قرار لون هوية يعود للمالك
+    // chat studio: شرائح تدرج تُقاس خطأً (1.29)؛ تباين فقاعة الصادر محروس في bubble_contrast_test.dart
     // ai/voice studio (شرائح بتدرج) وwelcome (زر بتدرج) يُقاس تباينها خطأً أو يعود لقرار لوحة الألوان: خارج الفحص
     const contrastSkip = {'welcome', 'ai', 'voice studio', 'chat studio'};
     for (final light in contrastSkip.contains(e.key) ? const <bool>[] : [false, true]) {

@@ -814,11 +814,19 @@ class BubbleLook {
     final fill = c?.bubbleFill ?? g.bubbleFill;
     final own = c?.ownBubble ?? g.ownBubble;
     final other = c?.otherBubble ?? g.otherBubble;
-    final ownColor = Color(own ?? g.accent);
+    // فقاعة الصادر الافتراضية (لا لون مخصص): تُغمَّق 12% عن تدرج الهوية ليبلغ نصها الأبيض
+    // AA 4.5:1 على طول التدرج (كان 3.74 عند طرف التيل)؛ زر الهوية والتدرج العام لا يتأثران.
+    // لون اختاره المستخدم يُحترم كما هو.
+    Color bubbleTone(int c) => Color.lerp(Color(c), Colors.black, 0.12)!;
+    final ownColor = own != null ? Color(own) : bubbleTone(g.accent);
     LinearGradient? grad;
     if (fill == StudioBubbleFill.gradient) {
       grad = own == null
-          ? g.gradient
+          ? LinearGradient(
+              colors: [bubbleTone(g.accent), bubbleTone(g.accent2)],
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
+            )
           : LinearGradient(
               colors: [ownColor, Color.lerp(ownColor, Colors.black, 0.28)!],
               begin: Alignment.topRight,
