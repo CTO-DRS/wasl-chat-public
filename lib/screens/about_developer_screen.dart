@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
@@ -265,7 +266,11 @@ class AboutDeveloperScreen extends StatelessWidget {
   }
 
   Widget _avatar(BuildContext context) {
-    return GestureDetector(
+    return Semantics(
+      button: true,
+      label: 'صورة المطوّر، اضغط للتكبير',
+      excludeSemantics: true,
+      child: GestureDetector(
       key: const ValueKey('dev-avatar'),
       onTap: () => _showPhoto(context),
       child: SizedBox(
@@ -303,7 +308,7 @@ class AboutDeveloperScreen extends StatelessWidget {
           ),
         ]),
       ),
-    );
+    ));
   }
 
   Widget _cell(BuildContext context, DeveloperLink l, bool ar, bool dark) {
@@ -547,7 +552,8 @@ class _BannerCarouselState extends State<_BannerCarousel> {
     if (developerBanners.isEmpty) return const SizedBox.shrink();
     return Column(children: [
       SizedBox(
-        height: 112,
+        // يكبر مع حجم الخط (خط النظام المكبّر كان يقص النص)
+        height: math.max(112, 36 + MediaQuery.textScalerOf(context).scale(62)),
         child: PageView.builder(
           key: const ValueKey('dev-banners'),
           controller: _controller,

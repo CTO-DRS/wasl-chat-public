@@ -1,0 +1,38 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:wasl_chat/screens/about_developer_screen.dart';
+import 'package:wasl_chat/screens/business_replies_screen.dart';
+import 'package:wasl_chat/theme.dart';
+
+import 'support/render_harness.dart';
+
+/// تدقيق أهداف اللمس (48dp) والتسميات على شاشات كاملة بخط مكبّر 1.6.
+void main() {
+  Future<void> pump(WidgetTester tester, Widget child) async {
+    ignoreGlassTileAsserts();
+    tester.view.physicalSize = const Size(360 * 2, 900 * 2);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MediaQuery(
+      data: const MediaQueryData(size: Size(360, 900), textScaler: TextScaler.linear(1.6)),
+      child: renderHarness(child, WaslTheme.dark),
+    ));
+    await tester.pumpAndSettle();
+  }
+
+  final screens = <String, Widget Function()>{
+    'business replies': () => const BusinessRepliesScreen(),
+    'about developer': () => const AboutDeveloperScreen(bannerAutoPlay: false),
+  };
+
+  for (final e in screens.entries) {
+    testWidgets('${e.key}: tap targets, labels, no overflow at 1.6x', (tester) async {
+      final h = tester.ensureSemantics();
+      await pump(tester, e.value());
+      expect(tester.takeException(), isNull);
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      h.dispose();
+    });
+  }
+}
